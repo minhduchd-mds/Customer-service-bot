@@ -6,10 +6,19 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8787
+      PUBLIC_BASE_URL: https://${BOT_DOMAIN:?set BOT_DOMAIN}
+      BOT_STORE_FILE: /app/data/state/bots.json
+      PLATFORM_SETTINGS_FILE: /app/data/state/platform-settings.json
       KNOWLEDGE_ROOT: /app/data/repos
     volumes:
       - ./data/repos:/app/data/repos:ro
       - ./data/state:/app/data/state
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks: [edge, internal]
 
   postgres:
@@ -21,6 +30,11 @@ services:
       POSTGRES_DB: n8n
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n -d n8n"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks: [internal]
 
   redis:
@@ -29,12 +43,19 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks: [internal]
 
   n8n:
     image: n8nio/n8n:latest
     restart: unless-stopped
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
@@ -54,7 +75,11 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    depends_on: [bot, n8n]
+    depends_on:
+      bot:
+        condition: service_healthy
+      n8n:
+        condition: service_started
     environment:
       BOT_DOMAIN: ${BOT_DOMAIN:?set BOT_DOMAIN}
       N8N_DOMAIN: ${N8N_DOMAIN:?set N8N_DOMAIN}
