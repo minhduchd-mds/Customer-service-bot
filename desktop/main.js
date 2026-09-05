@@ -83,6 +83,7 @@ async function startEmbeddedRuntime() {
 
   process.env.HOST = '127.0.0.1';
   process.env.BOT_STORE_FILE = path.join(stateDir, 'bots.json');
+  process.env.PLATFORM_SETTINGS_FILE = path.join(stateDir, 'platform-settings.json');
   process.env.KNOWLEDGE_ROOT = knowledgeDir;
 
   const runtime = createApp();
@@ -132,6 +133,11 @@ async function runDesktopSmokeTest(origin, qrOrigin, qrSource) {
   if (!botsResponse.ok) throw new Error(`Desktop bots endpoint returned ${botsResponse.status}`);
   const bots = await botsResponse.json();
   if (!Array.isArray(bots?.bots)) throw new Error('Desktop bots endpoint payload is invalid');
+
+  const deploymentResponse = await fetch(`${origin}/api/deployment`, { signal: AbortSignal.timeout(10_000) });
+  if (!deploymentResponse.ok) throw new Error(`Desktop deployment endpoint returned ${deploymentResponse.status}`);
+  const deployment = await deploymentResponse.json();
+  if (!deployment?.deployment || typeof deployment?.dockerEnv !== 'string') throw new Error('Desktop deployment payload is invalid');
 
   if (qrSource === 'lan') {
     const handoffResponse = await fetch(`${qrOrigin}/connect/desktop-smoke-invalid`, { signal: AbortSignal.timeout(10_000) });
