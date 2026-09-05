@@ -1,4 +1,5 @@
 import { headerValue, normalizedEvent } from './base.js';
+import { safeEqualText } from '../lib/crypto.js';
 
 export class TelegramConnector {
   constructor(config) { this.config = config; this.id = 'telegram'; }
@@ -8,7 +9,7 @@ export class TelegramConnector {
   verify({ headers }) {
     if (!this.config.webhookSecret) return { ok: false, reason: 'telegram_webhook_secret_not_configured' };
     const received = headerValue(headers, 'x-telegram-bot-api-secret-token');
-    return received === this.config.webhookSecret ? { ok: true } : { ok: false, reason: 'invalid_telegram_secret' };
+    return safeEqualText(received, this.config.webhookSecret) ? { ok: true } : { ok: false, reason: 'invalid_telegram_secret' };
   }
   normalize(payload) {
     const message = payload.message || payload.edited_message || payload.channel_post || {};
