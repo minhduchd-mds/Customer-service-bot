@@ -8,7 +8,9 @@ const RULES = [
   { category: 'path-traversal', reason: 'deep path traversal', re: /(?:\.\.[\\/]){3,}/ },
   { category: 'database-destruction', reason: 'destructive database statement', re: /\b(?:drop\s+(?:database|table)|truncate\s+table)\b/i },
   { category: 'privilege-escalation', reason: 'privilege escalation instruction', re: /\b(?:sudo\s+-?s|sudo\s+su|runas\s+\/user:administrator)\b/i },
-  { category: 'secret-disclosure', reason: 'instruction attempts to expose hidden prompts or secrets', re: /(?:reveal|print|dump|expose).{0,40}(?:system prompt|hidden prompt|api key|access token|private key)/i }
+  { category: 'secret-disclosure', reason: 'instruction attempts to expose hidden prompts or secrets', re: /(?:reveal|print|dump|expose).{0,40}(?:system prompt|hidden prompt|api key|access token|private key)/i },
+  { category: 'prompt-override', reason: 'instruction attempts to override higher-priority rules', re: /\b(?:ignore|disregard|override)\b.{0,40}\b(?:previous|prior|system|safety|policy)\b.{0,40}\b(?:instruction|rule|prompt|guardrail)s?\b/i },
+  { category: 'security-bypass', reason: 'instruction attempts to bypass a runtime security boundary', re: /\b(?:disable|bypass|skip|turn\s+off)\b.{0,50}\b(?:webhook\s+verification|signature\s+verification|tool\s+policy|grounding|safety\s+guardrail|authorization)\b/i }
 ];
 
 export function scanSkillContent(content = '') {

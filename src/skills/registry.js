@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { CORE_SKILLS, selectSkill as selectBuiltinSkill } from './catalog.js';
+import { CORE_SKILLS } from './catalog.js';
 import { assertSafeSkillContent } from './guard.js';
 
 const MAX_CONTENT_CHARS = 32_000;
@@ -81,18 +81,32 @@ function normalizeCustomSkill(input = {}, existing = null) {
   const slug = slugify(meta.slug || existing?.slug || name);
   if (!VALID_SLUG.test(slug)) throw Object.assign(new Error('invalid_skill_slug'), { code: 'invalid_skill_slug' });
   if (CORE_SKILLS.some((skill) => skill.slug === slug)) throw Object.assign(new Error('builtin_skill_conflict'), { code: 'builtin_skill_conflict' });
+
+  const description = String(meta.description || existing?.description || '').trim().slice(0, 1024);
+  const intents = uniqueStrings(Array.isArray(meta.intents) ? meta.intents : existing?.intents, 20, 40);
+  const triggers = uniqueStrings(Array.isArray(meta.triggers) ? meta.triggers : existing?.triggers, 30, 120);
+  const tags = uniqueStrings(Array.isArray(meta.tags) ? meta.tags : existing?.tags, 20, 40);
+  const capabilities = uniqueStrings(Array.isArray(meta.capabilities) ? meta.capabilities : existing?.capabilities, 30, 80);
   const instructions = String(meta.instructions || document.body || existing?.instructions || '').trim().slice(0, MAX_CONTENT_CHARS);
   if (!instructions) throw Object.assign(new Error('skill_instructions_required'), { code: 'skill_instructions_required' });
-  assertSafeSkillContent(instructions);
+
+  assertSafeSkillContent([
+    `name: ${name}`,
+    `description: ${description}`,
+    `triggers: ${triggers.join(' | ')}`,
+    `tags: ${tags.join(' | ')}`,
+    instructions
+  ].join('\n'));
+
   const skill = {
     id: existing?.id || `skill_${randomUUID()}`,
     slug,
     name,
-    description: String(meta.description || existing?.description || '').trim().slice(0, 1024),
-    intents: uniqueStrings(Array.isArray(meta.intents) ? meta.intents : existing?.intents, 20, 40),
-    triggers: uniqueStrings(Array.isArray(meta.triggers) ? meta.triggers : existing?.triggers, 30, 120),
-    tags: uniqueStrings(Array.isArray(meta.tags) ? meta.tags : existing?.tags, 20, 40),
-    capabilities: uniqueStrings(Array.isArray(meta.capabilities) ? meta.capabilities : existing?.capabilities, 30, 80),
+    description,
+    intents,
+    triggers,
+    tags,
+    capabilities,
     instructions,
     source: 'custom',
     version: existing?.version || 1,
@@ -113,6 +127,7 @@ function skillAllowedForBot(skill, bot) {
 }
 
 function publicSkill(skill, includeContent = false) {
+  if (!skill) return null;
   const item = clone(skill);
   if (!includeContent) delete item.instructions;
   return item;
@@ -190,7 +205,7 @@ export class SkillRegistry {
         ...(skill.intents || [])
       ].join(' ');
       const tokens = tokenize(weighted);
-      return { skill, tokens, length: Math.max(tokens.length, 1), text: weighted.toLocaleLowerCase('vi') };
+      return { skill, tokens, length: Math.max(tokens.length, 1) };
     });
     const avgLength = docs.reduce((sum, item) => sum + item.length, 0) / Math.max(docs.length, 1);
     const scores = docs.map((doc) => {
@@ -214,15 +229,21 @@ export class SkillRegistry {
 
   async select({ intent, text, bot = null } = {}) {
     const candidates = await this.list({ bot, includeContent: true });
+    if (!candidates.length) return null;
+
     const exact = candidates.find((skill) => skill.intents?.includes(intent));
     if (exact) return { ...exact, matchScore: 100, matchReason: 'intent' };
+
     const searched = await this.search(text || intent || '', { bot, limit: 1 });
     if (searched[0]) {
-      const full = await this.get(searched[0].skill.slug, { bot, includeContent: true });
-      return { ...full, matchScore: searched[0].score, matchReason: 'search' };
+      const full = candidates.find((skill) => skill.slug === searched[0].skill.slug) || null;
+      if (full) return { ...full, matchScore: searched[0].score, matchReason: 'search' };
     }
-    const fallback = selectBuiltinSkill(intent);
-    return { ...fallback, matchScore: 0, matchReason: 'fallback' };
+
+    const fallback = candidates.find((skill) => skill.slug === 'knowledge-retrieval')
+      || candidates.find((skill) => skill.intents?.includes('general'))
+      || candidates[0];
+    return { ...fallback, matchScore: 0, matchReason: 'allowed-fallback' };
   }
 
   async evaluate(cases = [], { bot = null } = {}) {
@@ -231,10 +252,21 @@ export class SkillRegistry {
     for (const item of bounded) {
       const selected = await this.select({ intent: item.intent || '', text: item.text || '', bot });
       const expected = String(item.expectedSkill || item.expected || '');
-      results.push({ text: String(item.text || '').slice(0, 300), expectedSkill: expected, selectedSkill: selected.slug, pass: expected ? selected.slug === expected : null });
+      results.push({
+        text: String(item.text || '').slice(0, 300),
+        expectedSkill: expected,
+        selectedSkill: selected?.slug || null,
+        pass: expected ? selected?.slug === expected : null
+      });
     }
     const scored = results.filter((item) => item.pass != null);
-    return { total: results.length, scored: scored.length, passed: scored.filter((item) => item.pass).length, accuracy: scored.length ? scored.filter((item) => item.pass).length / scored.length : null, results };
+    return {
+      total: results.length,
+      scored: scored.length,
+      passed: scored.filter((item) => item.pass).length,
+      accuracy: scored.length ? scored.filter((item) => item.pass).length / scored.length : null,
+      results
+    };
   }
 
   async load() {

@@ -2,14 +2,24 @@ function cleanText(value, maxChars = 2000) {
   return String(value || '').replace(/\u0000/g, '').trim().slice(0, maxChars);
 }
 
+function keyPart(value, fallback) {
+  const clean = String(value || fallback || '').replace(/[:\u0000\r\n]/g, '_').trim();
+  return clean || fallback;
+}
+
 export class ConversationMemory {
   constructor({ maxTurns = 12 } = {}) {
     this.maxMessages = Math.max(2, Math.min(Number(maxTurns) || 12, 40)) * 2;
     this.sessions = new Map();
   }
 
-  key({ botId = 'global', channel = 'unknown', senderId = 'anonymous' } = {}) {
-    return `${botId}:${channel}:${senderId}`;
+  key({ botId = 'global', channel = 'unknown', conversationId = 'direct', senderId = 'anonymous' } = {}) {
+    return [
+      keyPart(botId, 'global'),
+      keyPart(channel, 'unknown'),
+      keyPart(conversationId, 'direct'),
+      keyPart(senderId, 'anonymous')
+    ].join(':');
   }
 
   history(key, { limit = this.maxMessages } = {}) {

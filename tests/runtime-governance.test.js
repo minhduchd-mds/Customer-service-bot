@@ -12,15 +12,19 @@ test('tool policy supports conservative profiles and explicit deny', () => {
   assert.equal(policy.allows({ toolPolicy: { profile: 'read-only', allow: ['human.handoff'], deny: [] } }, 'human.handoff'), true);
 });
 
-test('conversation memory is bounded and isolated by bot/channel/sender', () => {
+test('conversation memory is bounded and isolated by bot/channel/conversation/sender', () => {
   const memory = new ConversationMemory({ maxTurns: 2 });
-  const a = memory.key({ botId: 'a', channel: 'zalo', senderId: 'u1' });
-  const b = memory.key({ botId: 'b', channel: 'zalo', senderId: 'u1' });
+  const a = memory.key({ botId: 'a', channel: 'zalo', conversationId: 'group-1', senderId: 'u1' });
+  const b = memory.key({ botId: 'b', channel: 'zalo', conversationId: 'group-1', senderId: 'u1' });
+  const c = memory.key({ botId: 'a', channel: 'zalo', conversationId: 'group-2', senderId: 'u1' });
   for (let index = 0; index < 8; index += 1) memory.remember(a, { role: index % 2 ? 'assistant' : 'user', content: `m${index}` });
   memory.remember(b, { role: 'user', content: 'other bot' });
+  memory.remember(c, { role: 'user', content: 'other group' });
   assert.equal(memory.history(a).length, 4);
   assert.equal(memory.history(a)[0].content, 'm4');
   assert.equal(memory.history(b).length, 1);
+  assert.equal(memory.history(c).length, 1);
+  assert.notEqual(a, c);
 });
 
 test('trace store records operational metadata without customer message bodies', () => {

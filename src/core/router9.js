@@ -37,6 +37,7 @@ export class Router9 {
     let intent = null;
     let skill = null;
     let responseSource = 'none';
+    let aiProvider = null;
     let handoff = false;
     let outbound = { delivered: false, reason: dispatch ? 'not_replyable' : 'simulation' };
     const capability = (name) => this.toolPolicy ? this.toolPolicy.allows(bot, name) : true;
@@ -81,12 +82,17 @@ export class Router9 {
     skill = this.skills
       ? await this.skills.select({ intent, text: event.text, bot })
       : selectBuiltinSkill(intent);
-    const skillId = skill?.slug || skill?.id || 'support-triage';
-    trace.push({ stage: 6, name: 'intent-skill', ok: true, intent, skill: skillId, skillSource: skill?.source || 'builtin', matchReason: skill?.matchReason || 'intent', mode: bot?.intelligenceMode || 'hybrid' });
+    const skillId = skill?.slug || skill?.id || 'none';
+    trace.push({ stage: 6, name: 'intent-skill', ok: true, intent, skill: skillId, skillSource: skill?.source || null, matchReason: skill?.matchReason || 'intent', mode: bot?.intelligenceMode || 'hybrid' });
 
     const repositoryKnowledge = capability('knowledge.search') && event.text ? await this.knowledge.search(event.text, { limit: 4 }) : [];
     const botKnowledge = capability('knowledge.search') && Array.isArray(bot?.knowledgeSources) ? bot.knowledgeSources.slice(0, 8) : [];
-    const memoryKey = this.memory?.key({ botId: bot?.id || 'global', channel: event.channel, senderId: event.senderId || event.chatId || 'anonymous' });
+    const memoryKey = this.memory?.key({
+      botId: bot?.id || 'global',
+      channel: event.channel,
+      conversationId: event.conversationId || event.chatId || event.senderId || 'direct',
+      senderId: event.senderId || 'anonymous'
+    });
     const history = capability('memory.read') && this.memory && memoryKey ? this.memory.history(memoryKey) : [];
     trace.push({ stage: 7, name: 'knowledge', ok: true, matches: repositoryKnowledge.length, botSources: botKnowledge.length, memoryTurns: Math.ceil(history.length / 2) });
 
@@ -95,9 +101,16 @@ export class Router9 {
       const scenario = capability('scenario.resolve') ? resolveScenario(bot, intent) : null;
       if (scenario?.useAi) {
         const context = { event, intent, skill, knowledge: repositoryKnowledge, bot, botKnowledge, history, scenarioInstruction: scenario.instruction };
-        reply = capability('ai.reply') ? await this.ai.reply(context) : this.ai.fallback?.(context) || '';
+        if (capability('ai.reply')) {
+          const result = await this.aiResult(context);
+          reply = result.text;
+          aiProvider = result.provider;
+          responseSource = result.source === 'ai' ? 'scenario-ai' : 'scenario-grounded-fallback';
+        } else {
+          reply = this.ai.fallback?.(context) || '';
+          responseSource = 'scenario-grounded-fallback';
+        }
         handoff = scenario.handoff;
-        responseSource = capability('ai.reply') && this.ai.enabled ? 'scenario-ai' : 'scenario-grounded-fallback';
       } else if (scenario?.response) {
         reply = scenario.response;
         handoff = scenario.handoff;
@@ -110,11 +123,22 @@ export class Router9 {
         handoff = bot?.intelligenceMode === 'scenario';
         responseSource = bot?.intelligenceMode === 'scenario' ? 'scenario-fallback' : 'policy-fallback';
       } else {
-        reply = await this.ai.reply({ event, intent, skill, knowledge: repositoryKnowledge, bot, botKnowledge, history });
-        responseSource = this.ai.enabled ? 'ai' : 'fallback';
+        const result = await this.aiResult({ event, intent, skill, knowledge: repositoryKnowledge, bot, botKnowledge, history });
+        reply = result.text;
+        aiProvider = result.provider;
+        responseSource = result.source === 'ai' ? 'ai' : 'fallback';
       }
     }
-    trace.push({ stage: 8, name: 'response', ok: true, generated: Boolean(reply), provider: responseSource, handoff });
+    trace.push({
+      stage: 8,
+      name: 'response',
+      ok: true,
+      generated: Boolean(reply),
+      provider: responseSource,
+      aiProvider: aiProvider?.name || null,
+      aiModel: aiProvider?.model || null,
+      handoff
+    });
 
     let workflowResult = { delivered: false, reason: 'policy_disabled' };
     if (capability('workflow.emit')) {
@@ -160,12 +184,19 @@ export class Router9 {
       skill: publicSkill(skill),
       knowledge: repositoryKnowledge,
       responseSource,
+      aiProvider,
       handoff,
       reply,
       outbound,
       workflow: workflowResult,
       trace
     }, { startedAt, bot, event, intent, skill, responseSource, handoff, outbound });
+  }
+
+  async aiResult(context) {
+    if (typeof this.ai.replyDetailed === 'function') return this.ai.replyDetailed(context);
+    const text = await this.ai.reply(context);
+    return { text, source: this.ai.enabled ? 'ai' : 'fallback', provider: null };
   }
 
   finish(result, context) {
