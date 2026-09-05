@@ -5,6 +5,7 @@ import { mkdir } from 'node:fs/promises';
 import { createApp } from '../src/app.js';
 
 const APP_NAME = 'Customer Service Bot';
+const SMOKE_TEST = process.argv.includes('--desktop-smoke-test');
 let mainWindow = null;
 let localServer = null;
 let localOrigin = '';
@@ -29,6 +30,16 @@ app.whenReady().then(async () => {
     const runtime = await startEmbeddedRuntime();
     localServer = runtime.server;
     localOrigin = runtime.origin;
+
+    if (SMOKE_TEST) {
+      await runDesktopSmokeTest(localOrigin);
+      await closeServer(localServer);
+      localServer = null;
+      console.log(JSON.stringify({ ok: true, event: 'desktop_smoke_test_passed', origin: localOrigin }));
+      app.exit(0);
+      return;
+    }
+
     mainWindow = createWindow(localOrigin);
   } catch (error) {
     const detail = error?.stack || error?.message || String(error);
@@ -38,7 +49,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0 && localOrigin) {
+  if (BrowserWindow.getAllWindows().length === 0 && localOrigin && !SMOKE_TEST) {
     mainWindow = createWindow(localOrigin);
   }
 });
@@ -87,6 +98,18 @@ async function startEmbeddedRuntime() {
   return { server, runtime, origin };
 }
 
+async function runDesktopSmokeTest(origin) {
+  const healthResponse = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(10_000) });
+  if (!healthResponse.ok) throw new Error(`Desktop health endpoint returned ${healthResponse.status}`);
+  const health = await healthResponse.json();
+  if (health?.ok !== true || health?.product !== 'Bot Hub') throw new Error('Desktop health payload is invalid');
+
+  const botsResponse = await fetch(`${origin}/api/bots`, { signal: AbortSignal.timeout(10_000) });
+  if (!botsResponse.ok) throw new Error(`Desktop bots endpoint returned ${botsResponse.status}`);
+  const bots = await botsResponse.json();
+  if (!Array.isArray(bots?.bots)) throw new Error('Desktop bots endpoint payload is invalid');
+}
+
 function createWindow(origin) {
   const window = new BrowserWindow({
     width: 1440,
@@ -130,4 +153,11 @@ function isLocalUrl(url, origin) {
   } catch {
     return false;
   }
+}
+
+function closeServer(server) {
+  return new Promise((resolve) => {
+    if (!server?.listening) return resolve();
+    server.close(() => resolve());
+  });
 }
