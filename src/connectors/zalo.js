@@ -1,4 +1,5 @@
 import { headerValue, normalizedEvent } from './base.js';
+import { safeEqualText } from '../lib/crypto.js';
 
 export class ZaloConnector {
   constructor(config) { this.config = config; this.id = 'zalo'; }
@@ -16,7 +17,7 @@ export class ZaloConnector {
     if (!this.config.webhookSecret) return { ok: false, reason: 'zalo_webhook_secret_not_configured' };
     const headerSecret = headerValue(headers, 'x-bot-webhook-secret');
     const querySecret = url?.searchParams?.get('secret') || '';
-    return headerSecret === this.config.webhookSecret || querySecret === this.config.webhookSecret
+    return safeEqualText(headerSecret, this.config.webhookSecret) || safeEqualText(querySecret, this.config.webhookSecret)
       ? { ok: true }
       : { ok: false, reason: 'invalid_zalo_shared_secret' };
   }
