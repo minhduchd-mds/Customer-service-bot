@@ -84,6 +84,7 @@ async function startEmbeddedRuntime() {
   process.env.HOST = '127.0.0.1';
   process.env.BOT_STORE_FILE = path.join(stateDir, 'bots.json');
   process.env.PLATFORM_SETTINGS_FILE = path.join(stateDir, 'platform-settings.json');
+  process.env.SKILL_STORE_FILE = path.join(stateDir, 'skills.json');
   process.env.KNOWLEDGE_ROOT = knowledgeDir;
 
   const runtime = createApp();
@@ -115,11 +116,7 @@ async function startEmbeddedRuntime() {
     }
   }
 
-  // QR sessions use an HTTPS public URL when configured. Otherwise the desktop
-  // app exposes only /connect/* on a LAN listener so a phone on the same Wi-Fi
-  // can open the handoff page without exposing the Bot Hub APIs to the LAN.
   runtime.connectSessions.publicBaseUrl = qrOrigin;
-
   return { server, handoffServer: qrHandoffServer, runtime, origin, qrOrigin, qrSource };
 }
 
@@ -133,6 +130,11 @@ async function runDesktopSmokeTest(origin, qrOrigin, qrSource) {
   if (!botsResponse.ok) throw new Error(`Desktop bots endpoint returned ${botsResponse.status}`);
   const bots = await botsResponse.json();
   if (!Array.isArray(bots?.bots)) throw new Error('Desktop bots endpoint payload is invalid');
+
+  const skillsResponse = await fetch(`${origin}/api/skills`, { signal: AbortSignal.timeout(10_000) });
+  if (!skillsResponse.ok) throw new Error(`Desktop skills endpoint returned ${skillsResponse.status}`);
+  const skills = await skillsResponse.json();
+  if (!Array.isArray(skills?.skills) || !skills.skills.length) throw new Error('Desktop skills endpoint payload is invalid');
 
   const deploymentResponse = await fetch(`${origin}/api/deployment`, { signal: AbortSignal.timeout(10_000) });
   if (!deploymentResponse.ok) throw new Error(`Desktop deployment endpoint returned ${deploymentResponse.status}`);
@@ -165,19 +167,16 @@ function createWindow(origin) {
   });
 
   window.once('ready-to-show', () => window.show());
-
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isLocalUrl(url, origin)) return { action: 'allow' };
     void shell.openExternal(url);
     return { action: 'deny' };
   });
-
   window.webContents.on('will-navigate', (event, url) => {
     if (isLocalUrl(url, origin)) return;
     event.preventDefault();
     void shell.openExternal(url);
   });
-
   void window.loadURL(origin);
   return window;
 }
@@ -192,15 +191,8 @@ function connectOnlyHandler(appHandler) {
       response.end('Bad request');
       return;
     }
-
-    if (request.method === 'GET' && pathname.startsWith('/connect/')) {
-      return appHandler(request, response);
-    }
-
-    response.writeHead(404, {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store'
-    });
+    if (request.method === 'GET' && pathname.startsWith('/connect/')) return appHandler(request, response);
+    response.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
     response.end(JSON.stringify({ error: 'not_found' }));
   };
 }
@@ -222,11 +214,7 @@ function listen(server, host) {
 }
 
 function isLocalUrl(url, origin) {
-  try {
-    return new URL(url).origin === origin;
-  } catch {
-    return false;
-  }
+  try { return new URL(url).origin === origin; } catch { return false; }
 }
 
 function closeServer(server) {

@@ -1,10 +1,10 @@
 {
   "name": "customer-service-bot",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "main": "desktop/main.js",
-  "description": "Multi-bot omnichannel customer-service Bot Hub for web, Windows desktop, Docker/VPS, product scenarios, Telegram, Facebook Messenger, Zalo OA and approved TikTok integrations.",
+  "description": "Multi-bot omnichannel customer-service Bot Hub with safe dynamic skills, runtime governance, Windows desktop, Docker/VPS and approved channel integrations.",
   "engines": { "node": ">=22" },
   "scripts": {
     "start": "node src/server.js",

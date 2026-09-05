@@ -13,12 +13,15 @@ import { Router9 } from './core/router9.js';
 import { BotStore } from './core/bot-store.js';
 import { ConnectSessionStore } from './core/connect-session.js';
 import { PlatformSettingsStore, deploymentEnv, deploymentSummary } from './core/platform-settings.js';
+import { ConversationMemory } from './core/conversation-memory.js';
+import { ToolPolicy } from './core/tool-policy.js';
+import { TraceStore } from './core/trace-store.js';
 import { listScenarioTemplates, scenarioFromTemplate } from './core/scenario.js';
 import { TelegramConnector } from './connectors/telegram.js';
 import { FacebookConnector } from './connectors/facebook.js';
 import { ZaloConnector } from './connectors/zalo.js';
 import { TikTokConnector } from './connectors/tiktok.js';
-import { listSkills } from './skills/catalog.js';
+import { SkillRegistry } from './skills/registry.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(dirname, '../public');
@@ -35,11 +38,19 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
     zalo: new ZaloConnector(config.zalo),
     tiktok: new TikTokConnector(config.tiktok)
   };
+  const skills = new SkillRegistry({ file: config.skillStoreFile, logger });
+  const toolPolicy = new ToolPolicy();
+  const memory = new ConversationMemory({ maxTurns: config.conversationMemoryTurns });
+  const traces = new TraceStore({ limit: config.traceLimit });
   const router = new Router9({
     idempotency: new IdempotencyStore({ ttlSeconds: config.idempotencyTtlSeconds }),
     knowledge: new KnowledgeIndex({ ...config.knowledge, logger }),
     ai: new AiRouter(config.ai, logger),
     workflow: new WorkflowBridge(config.n8n, logger),
+    skills,
+    toolPolicy,
+    memory,
+    traces,
     logger
   });
   const bots = new BotStore({ file: config.botStoreFile, logger });
@@ -62,6 +73,7 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
           service: 'customer-service-bot',
           product: 'Bot Hub',
           uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+          skills: (await skills.list()).length,
           now: new Date().toISOString()
         });
       }
@@ -70,24 +82,62 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
         return json(response, 200, {
           channels: Object.values(connectors).map((connector) => connector.status()),
           connectMethods: {
-            zalo: 'qr-oauth',
-            facebook: 'qr-oauth',
-            telegram: 'qr-handoff',
-            tiktok: 'qr-oauth',
-            web: 'instant'
+            zalo: 'qr-oauth', facebook: 'qr-oauth', telegram: 'qr-handoff', tiktok: 'qr-oauth', web: 'instant'
           }
         });
       }
 
       if (request.method === 'GET' && url.pathname === '/api/metrics') return json(response, 200, router.snapshotMetrics());
-      if (request.method === 'GET' && url.pathname === '/api/skills') return json(response, 200, { skills: listSkills() });
       if (request.method === 'GET' && url.pathname === '/api/scenario-templates') return json(response, 200, { templates: listScenarioTemplates() });
+      if (request.method === 'GET' && url.pathname === '/api/tool-policy/profiles') return json(response, 200, { profiles: toolPolicy.listProfiles() });
+
+      if (request.method === 'GET' && url.pathname === '/api/skills') {
+        const bot = url.searchParams.get('botId') ? await requireBot(bots, url.searchParams.get('botId')) : null;
+        return json(response, 200, { skills: await skills.list({ bot }) });
+      }
+      if (request.method === 'POST' && url.pathname === '/api/skills/search') {
+        const payload = await requestJson(request, config.maxBodyBytes);
+        const bot = payload.botId ? await requireBot(bots, payload.botId) : null;
+        return json(response, 200, { query: payload.query || '', results: await skills.search(payload.query || '', { bot, limit: payload.limit }) });
+      }
+      if (request.method === 'POST' && url.pathname === '/api/skills/evaluate') {
+        const payload = await requestJson(request, config.maxBodyBytes);
+        const bot = payload.botId ? await requireBot(bots, payload.botId) : null;
+        return json(response, 200, await skills.evaluate(payload.cases || [], { bot }));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/skills') {
+        const payload = await requestJson(request, config.maxBodyBytes);
+        const result = await skills.publish(payload);
+        return json(response, result.unchanged ? 200 : 201, result);
+      }
+      const skillMatch = url.pathname.match(/^\/api\/skills\/([^/]+)$/);
+      if (skillMatch && request.method === 'GET') {
+        const skill = await skills.get(decodeURIComponent(skillMatch[1]), { includeDisabled: true, includeContent: true });
+        if (!skill) throw new HttpError(404, 'Skill not found', 'skill_not_found');
+        return json(response, 200, { skill });
+      }
+      if (skillMatch && request.method === 'PATCH') {
+        const payload = await requestJson(request, config.maxBodyBytes);
+        if (typeof payload.enabled !== 'boolean') throw new HttpError(400, 'enabled boolean is required', 'skill_enabled_required');
+        const skill = await skills.toggle(decodeURIComponent(skillMatch[1]), payload.enabled);
+        if (!skill) throw new HttpError(404, 'Skill not found', 'skill_not_found');
+        return json(response, 200, { skill });
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/traces') {
+        return json(response, 200, { traces: traces.list({ botId: url.searchParams.get('botId'), limit: url.searchParams.get('limit') }) });
+      }
+      const traceMatch = url.pathname.match(/^\/api\/traces\/(trace_[^/]+)$/);
+      if (traceMatch && request.method === 'GET') {
+        const traceItem = traces.get(traceMatch[1]);
+        if (!traceItem) throw new HttpError(404, 'Trace not found', 'trace_not_found');
+        return json(response, 200, { trace: traceItem });
+      }
 
       if (request.method === 'GET' && url.pathname === '/api/deployment') {
         const profile = await platformSettings.get();
         return json(response, 200, deploymentPayload(profile, config.publicBaseUrl));
       }
-
       if (request.method === 'PATCH' && url.pathname === '/api/deployment') {
         const payload = await requestJson(request, config.maxBodyBytes);
         let profile;
@@ -100,10 +150,7 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
         return json(response, 200, deploymentPayload(profile, config.publicBaseUrl));
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/bots') {
-        return json(response, 200, { bots: await bots.list() });
-      }
-
+      if (request.method === 'GET' && url.pathname === '/api/bots') return json(response, 200, { bots: await bots.list() });
       if (request.method === 'POST' && url.pathname === '/api/bots') {
         const payload = await requestJson(request, config.maxBodyBytes);
         let bot;
@@ -121,15 +168,24 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
       }
 
       const botMatch = url.pathname.match(/^\/api\/bots\/([^/]+)$/);
-      if (botMatch && request.method === 'GET') {
-        const bot = await requireBot(bots, botMatch[1]);
-        return json(response, 200, { bot });
-      }
+      if (botMatch && request.method === 'GET') return json(response, 200, { bot: await requireBot(bots, botMatch[1]) });
       if (botMatch && request.method === 'PATCH') {
         await requireBot(bots, botMatch[1]);
         const payload = await requestJson(request, config.maxBodyBytes);
-        const bot = await bots.update(botMatch[1], payload);
-        return json(response, 200, { bot });
+        return json(response, 200, { bot: await bots.update(botMatch[1], payload) });
+      }
+
+      const botSkillsMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/skills$/);
+      if (botSkillsMatch && request.method === 'PUT') {
+        await requireBot(bots, botSkillsMatch[1]);
+        const payload = await requestJson(request, config.maxBodyBytes);
+        return json(response, 200, { bot: await bots.setSkills(botSkillsMatch[1], payload) });
+      }
+      const botToolPolicyMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/tool-policy$/);
+      if (botToolPolicyMatch && request.method === 'PUT') {
+        await requireBot(bots, botToolPolicyMatch[1]);
+        const payload = await requestJson(request, config.maxBodyBytes);
+        return json(response, 200, { bot: await bots.setToolPolicy(botToolPolicyMatch[1], payload) });
       }
 
       const knowledgeMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/knowledge$/);
@@ -151,16 +207,14 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
         await requireBot(bots, scenarioMatch[1]);
         const payload = await requestJson(request, config.maxBodyBytes);
         const template = payload.template ? scenarioFromTemplate(payload.template) : null;
-        const bot = await bots.setScenario(scenarioMatch[1], template || payload);
-        return json(response, 200, { bot });
+        return json(response, 200, { bot: await bots.setScenario(scenarioMatch[1], template || payload) });
       }
 
       const liveMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/go-live$/);
       if (liveMatch && request.method === 'POST') {
         const current = await requireBot(bots, liveMatch[1]);
         if (!current.channels.length) throw new HttpError(409, 'Connect at least one channel before going live', 'channel_required');
-        const bot = await bots.update(liveMatch[1], { status: 'running' });
-        return json(response, 200, { bot });
+        return json(response, 200, { bot: await bots.update(liveMatch[1], { status: 'running' }) });
       }
 
       const botSimulateMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/simulate$/);
@@ -171,8 +225,7 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
         const connector = connectors[channel] || connectors.telegram;
         const syntheticPayload = toSyntheticPayload(channel, payload);
         const syntheticRaw = Buffer.from(JSON.stringify(syntheticPayload));
-        const result = await router.handle({ connector, rawBody: syntheticRaw, payload: syntheticPayload, headers: {}, url, dispatch: false, skipVerification: true, bot });
-        return json(response, 200, result);
+        return json(response, 200, await router.handle({ connector, rawBody: syntheticRaw, payload: syntheticPayload, headers: {}, url, dispatch: false, skipVerification: true, bot }));
       }
 
       if (request.method === 'POST' && url.pathname === '/api/connect/sessions') {
@@ -235,8 +288,7 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
         if (!connector) throw new HttpError(400, 'Unknown channel', 'unknown_channel');
         const syntheticPayload = toSyntheticPayload(channel, payload);
         const syntheticRaw = Buffer.from(JSON.stringify(syntheticPayload));
-        const result = await router.handle({ connector, rawBody: syntheticRaw, payload: syntheticPayload, headers: {}, url, dispatch: false, skipVerification: true });
-        return json(response, 200, result);
+        return json(response, 200, await router.handle({ connector, rawBody: syntheticRaw, payload: syntheticPayload, headers: {}, url, dispatch: false, skipVerification: true }));
       }
 
       const botWebhookMatch = url.pathname.match(/^\/webhooks\/([^/]+)\/(telegram|facebook|zalo|tiktok)$/);
@@ -244,7 +296,6 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
         const bot = await requireBot(bots, botWebhookMatch[1]);
         return handleWebhook({ request, response, url, connector: connectors[botWebhookMatch[2]], channel: botWebhookMatch[2], router, config, bot });
       }
-
       const legacyWebhookMatch = url.pathname.match(/^\/webhooks\/(telegram|facebook|zalo|tiktok)$/);
       if (request.method === 'POST' && legacyWebhookMatch) {
         return handleWebhook({ request, response, url, connector: connectors[legacyWebhookMatch[1]], channel: legacyWebhookMatch[1], router, config, bot: null });
@@ -252,13 +303,26 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
 
       return json(response, 404, { error: 'not_found' });
     } catch (error) {
+      if (error?.code === 'skill_content_rejected') {
+        return json(response, 400, { error: 'skill_content_rejected', message: 'Skill content was rejected by the safety scanner', violations: error.violations || [] });
+      }
+      const skillErrors = {
+        skill_name_required: [400, 'Skill name is required'],
+        invalid_skill_slug: [400, 'Skill slug is invalid'],
+        skill_instructions_required: [400, 'Skill instructions are required'],
+        builtin_skill_conflict: [409, 'Custom skill cannot overwrite a built-in skill']
+      };
+      if (skillErrors[error?.code]) {
+        const [status, message] = skillErrors[error.code];
+        return json(response, status, { error: error.code, message });
+      }
       const statusCode = error instanceof HttpError ? error.statusCode : 500;
       logger.error({ event: 'request_failed', method: request.method, path: url.pathname, statusCode, reason: error?.message || 'unknown' });
       return json(response, statusCode, { error: error instanceof HttpError ? error.code : 'internal_error', message: statusCode >= 500 ? 'Internal server error' : error.message });
     }
   };
 
-  return { handler, config, connectors, router, bots, connectSessions, platformSettings };
+  return { handler, config, connectors, router, bots, connectSessions, platformSettings, skills, toolPolicy, memory, traces };
 }
 
 function deploymentPayload(profile, runtimePublicBaseUrl) {
@@ -310,9 +374,7 @@ function providerAuthorizeUrl(config, session) {
   const callbackBase = config.publicBaseUrl.replace(/\/$/, '');
   if (!callbackBase) return null;
   const callback = `${callbackBase}/connect/callback/${session.channel}`;
-  return template
-    .replaceAll('{state}', encodeURIComponent(session.token))
-    .replaceAll('{redirectUri}', encodeURIComponent(callback));
+  return template.replaceAll('{state}', encodeURIComponent(session.token)).replaceAll('{redirectUri}', encodeURIComponent(callback));
 }
 
 function connectionPage({ session, bot, providerUrl }) {
@@ -322,23 +384,16 @@ function connectionPage({ session, bot, providerUrl }) {
     ? `<a class="primary" href="${escapeHtml(providerUrl)}" rel="noreferrer">Continue with ${channel}</a>`
     : `<div class="notice">The official authorization URL for ${channel} is not active on this runtime yet. For production OAuth, deploy Bot Hub on a public HTTPS VPS and configure PUBLIC_BASE_URL plus the provider authorization template.</div>`;
   return mobileShell(`
-    <div class="mark">⌁</div>
-    <p class="eyebrow">Bot Hub connection</p>
-    <h1>Connect ${channel}</h1>
+    <div class="mark">⌁</div><p class="eyebrow">Bot Hub connection</p><h1>Connect ${channel}</h1>
     <p class="muted">You are connecting <strong>${botName}</strong>. This QR contains a temporary one-time handoff URL and expires automatically.</p>
-    ${action}
-    <p class="foot">Use official provider authorization only. Bot Hub does not capture personal web sessions or QR-login cookies.</p>
-  `);
+    ${action}<p class="foot">Use official provider authorization only. Bot Hub does not capture personal web sessions or QR-login cookies.</p>`);
 }
 
 function authorizationReceivedPage(channel) {
   return mobileShell(`
-    <div class="mark">✓</div>
-    <p class="eyebrow">Authorization returned</p>
-    <h1>Finish ${escapeHtml(channel)} setup</h1>
+    <div class="mark">✓</div><p class="eyebrow">Authorization returned</p><h1>Finish ${escapeHtml(channel)} setup</h1>
     <p class="muted">The provider redirected back to Bot Hub. The channel is marked <strong>authorization received</strong>. A provider-specific server token exchange must complete before production messages are enabled.</p>
-    <div class="notice">You can close this page and return to the Bot Hub dashboard.</div>
-  `);
+    <div class="notice">You can close this page and return to the Bot Hub dashboard.</div>`);
 }
 
 function connectionExpiredPage() {

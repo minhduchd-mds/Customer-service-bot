@@ -6,9 +6,40 @@ const DEFAULT_WORKSPACE = 'workspace_default';
 const PURPOSES = new Set(['sales', 'customer-care', 'support', 'custom']);
 const MODES = new Set(['ai', 'scenario', 'hybrid']);
 const STATUSES = new Set(['draft', 'running', 'paused']);
+const SKILL_MODES = new Set(['auto', 'allowlist']);
+const TOOL_PROFILES = new Set(['customer-service', 'read-only', 'human-assist', 'scenario-only']);
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function cleanStringList(value, limit = 40, maxChars = 80) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => String(item || '').trim().slice(0, maxChars)).filter(Boolean))].slice(0, limit);
+}
+
+function normalizeBot(bot) {
+  bot.channels = Array.isArray(bot.channels) ? bot.channels : [];
+  bot.knowledgeSources = Array.isArray(bot.knowledgeSources) ? bot.knowledgeSources : [];
+  bot.scenario = bot.scenario && typeof bot.scenario === 'object' ? bot.scenario : { template: null, rules: [], notes: '' };
+  bot.ai = {
+    enabled: true,
+    modelMode: 'automatic',
+    personality: 'Helpful · Professional · Vietnamese',
+    handoffConfidenceBelow: 0.7,
+    ...(bot.ai && typeof bot.ai === 'object' ? bot.ai : {})
+  };
+  bot.skills = {
+    mode: SKILL_MODES.has(bot.skills?.mode) ? bot.skills.mode : 'auto',
+    grants: cleanStringList(bot.skills?.grants, 60, 64)
+  };
+  bot.toolPolicy = {
+    profile: TOOL_PROFILES.has(bot.toolPolicy?.profile) ? bot.toolPolicy.profile : 'customer-service',
+    allow: cleanStringList(bot.toolPolicy?.allow, 40, 80),
+    deny: cleanStringList(bot.toolPolicy?.deny, 40, 80)
+  };
+  bot.metrics = bot.metrics && typeof bot.metrics === 'object' ? bot.metrics : { conversations: 0, automatedRate: 0, customers: 0 };
+  return bot;
 }
 
 export class BotStore {
@@ -35,7 +66,7 @@ export class BotStore {
     const name = String(input.name || '').trim().slice(0, 80);
     if (!name) throw new Error('bot_name_required');
     const now = new Date().toISOString();
-    const bot = {
+    const bot = normalizeBot({
       id: `bot_${randomUUID()}`,
       workspaceId,
       name,
@@ -52,10 +83,12 @@ export class BotStore {
         personality: 'Helpful · Professional · Vietnamese',
         handoffConfidenceBelow: 0.7
       },
+      skills: { mode: 'auto', grants: [] },
+      toolPolicy: { profile: 'customer-service', allow: [], deny: [] },
       metrics: { conversations: 0, automatedRate: 0, customers: 0 },
       createdAt: now,
       updatedAt: now
-    };
+    });
     this.bots.push(bot);
     await this.persist();
     return clone(bot);
@@ -82,9 +115,44 @@ export class BotStore {
         ...(Number.isFinite(Number(patch.ai.handoffConfidenceBelow)) ? { handoffConfidenceBelow: Math.max(0, Math.min(1, Number(patch.ai.handoffConfidenceBelow))) } : {})
       };
     }
+    if (patch.skills && typeof patch.skills === 'object') this.applySkillSettings(bot, patch.skills);
+    if (patch.toolPolicy && typeof patch.toolPolicy === 'object') this.applyToolPolicy(bot, patch.toolPolicy);
     bot.updatedAt = new Date().toISOString();
     await this.persist();
-    return clone(bot);
+    return clone(normalizeBot(bot));
+  }
+
+  async setSkills(id, settings = {}, workspaceId = DEFAULT_WORKSPACE) {
+    await this.load();
+    const bot = this.bots.find((item) => item.id === id && item.workspaceId === workspaceId);
+    if (!bot) return null;
+    this.applySkillSettings(bot, settings);
+    bot.updatedAt = new Date().toISOString();
+    await this.persist();
+    return clone(normalizeBot(bot));
+  }
+
+  async setToolPolicy(id, settings = {}, workspaceId = DEFAULT_WORKSPACE) {
+    await this.load();
+    const bot = this.bots.find((item) => item.id === id && item.workspaceId === workspaceId);
+    if (!bot) return null;
+    this.applyToolPolicy(bot, settings);
+    bot.updatedAt = new Date().toISOString();
+    await this.persist();
+    return clone(normalizeBot(bot));
+  }
+
+  applySkillSettings(bot, settings) {
+    bot.skills = bot.skills || { mode: 'auto', grants: [] };
+    if (SKILL_MODES.has(settings.mode)) bot.skills.mode = settings.mode;
+    if (Array.isArray(settings.grants)) bot.skills.grants = cleanStringList(settings.grants, 60, 64);
+  }
+
+  applyToolPolicy(bot, settings) {
+    bot.toolPolicy = bot.toolPolicy || { profile: 'customer-service', allow: [], deny: [] };
+    if (TOOL_PROFILES.has(settings.profile)) bot.toolPolicy.profile = settings.profile;
+    if (Array.isArray(settings.allow)) bot.toolPolicy.allow = cleanStringList(settings.allow, 40, 80);
+    if (Array.isArray(settings.deny)) bot.toolPolicy.deny = cleanStringList(settings.deny, 40, 80);
   }
 
   async upsertChannel(id, channel, patch = {}, workspaceId = DEFAULT_WORKSPACE) {
@@ -147,7 +215,7 @@ export class BotStore {
     try {
       const raw = await readFile(this.file, 'utf8');
       const payload = JSON.parse(raw);
-      this.bots = Array.isArray(payload?.bots) ? payload.bots : [];
+      this.bots = Array.isArray(payload?.bots) ? payload.bots.map((bot) => normalizeBot(bot)) : [];
     } catch (error) {
       if (error?.code !== 'ENOENT') this.logger?.warn({ event: 'bot_store_load_failed', reason: error?.message || 'unknown' });
       this.bots = [];
@@ -158,7 +226,7 @@ export class BotStore {
   async persist() {
     await mkdir(path.dirname(this.file), { recursive: true });
     const temporary = `${this.file}.tmp`;
-    await writeFile(temporary, JSON.stringify({ version: 1, bots: this.bots }, null, 2), { encoding: 'utf8', mode: 0o600 });
+    await writeFile(temporary, JSON.stringify({ version: 2, bots: this.bots }, null, 2), { encoding: 'utf8', mode: 0o600 });
     await rename(temporary, this.file);
   }
 }
