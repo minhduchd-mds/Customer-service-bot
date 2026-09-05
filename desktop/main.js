@@ -3,11 +3,13 @@ import http from 'node:http';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createApp } from '../src/app.js';
+import { selectLanAddress } from './network.js';
 
 const APP_NAME = 'Customer Service Bot';
 const SMOKE_TEST = process.argv.includes('--desktop-smoke-test');
 let mainWindow = null;
 let localServer = null;
+let handoffServer = null;
 let localOrigin = '';
 
 const gotLock = app.requestSingleInstanceLock();
@@ -29,13 +31,22 @@ app.whenReady().then(async () => {
   try {
     const runtime = await startEmbeddedRuntime();
     localServer = runtime.server;
+    handoffServer = runtime.handoffServer;
     localOrigin = runtime.origin;
 
     if (SMOKE_TEST) {
-      await runDesktopSmokeTest(localOrigin);
+      await runDesktopSmokeTest(localOrigin, runtime.qrOrigin, runtime.qrSource);
+      await closeServer(handoffServer);
       await closeServer(localServer);
+      handoffServer = null;
       localServer = null;
-      console.log(JSON.stringify({ ok: true, event: 'desktop_smoke_test_passed', origin: localOrigin }));
+      console.log(JSON.stringify({
+        ok: true,
+        event: 'desktop_smoke_test_passed',
+        origin: localOrigin,
+        qrOrigin: runtime.qrOrigin,
+        qrSource: runtime.qrSource
+      }));
       app.exit(0);
       return;
     }
@@ -59,6 +70,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (handoffServer) handoffServer.close();
   if (localServer) localServer.close();
 });
 
@@ -75,30 +87,42 @@ async function startEmbeddedRuntime() {
 
   const runtime = createApp();
   const server = http.createServer(runtime.handler);
-  server.keepAliveTimeout = 65_000;
-  server.headersTimeout = 70_000;
-
-  await new Promise((resolve, reject) => {
-    const onError = (error) => reject(error);
-    server.once('error', onError);
-    server.listen(0, '127.0.0.1', () => {
-      server.off('error', onError);
-      resolve();
-    });
-  });
+  tuneServer(server);
+  await listen(server, '127.0.0.1');
 
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Unable to resolve local desktop server port');
   const origin = `http://127.0.0.1:${address.port}`;
 
-  // QR sessions should point to the real public callback when configured;
-  // otherwise they point to the embedded local runtime for desktop-only flows.
-  runtime.connectSessions.publicBaseUrl = (process.env.PUBLIC_BASE_URL || origin).replace(/\/$/, '');
+  const configuredPublicBase = String(process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
+  let qrOrigin = configuredPublicBase || origin;
+  let qrSource = configuredPublicBase ? 'public' : 'loopback';
+  let qrHandoffServer = null;
 
-  return { server, runtime, origin };
+  if (!configuredPublicBase) {
+    const lanAddress = selectLanAddress();
+    if (lanAddress) {
+      qrHandoffServer = http.createServer(connectOnlyHandler(runtime.handler));
+      tuneServer(qrHandoffServer);
+      await listen(qrHandoffServer, '0.0.0.0');
+      const handoffAddress = qrHandoffServer.address();
+      if (!handoffAddress || typeof handoffAddress === 'string') throw new Error('Unable to resolve QR handoff server port');
+      qrOrigin = `http://${lanAddress}:${handoffAddress.port}`;
+      qrSource = 'lan';
+    } else {
+      console.warn('No reachable LAN IPv4 address found. QR handoff will remain localhost-only until PUBLIC_BASE_URL is configured.');
+    }
+  }
+
+  // QR sessions use an HTTPS public URL when configured. Otherwise the desktop
+  // app exposes only /connect/* on a LAN listener so a phone on the same Wi-Fi
+  // can open the handoff page without exposing the Bot Hub APIs to the LAN.
+  runtime.connectSessions.publicBaseUrl = qrOrigin;
+
+  return { server, handoffServer: qrHandoffServer, runtime, origin, qrOrigin, qrSource };
 }
 
-async function runDesktopSmokeTest(origin) {
+async function runDesktopSmokeTest(origin, qrOrigin, qrSource) {
   const healthResponse = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(10_000) });
   if (!healthResponse.ok) throw new Error(`Desktop health endpoint returned ${healthResponse.status}`);
   const health = await healthResponse.json();
@@ -108,6 +132,11 @@ async function runDesktopSmokeTest(origin) {
   if (!botsResponse.ok) throw new Error(`Desktop bots endpoint returned ${botsResponse.status}`);
   const bots = await botsResponse.json();
   if (!Array.isArray(bots?.bots)) throw new Error('Desktop bots endpoint payload is invalid');
+
+  if (qrSource === 'lan') {
+    const handoffResponse = await fetch(`${qrOrigin}/connect/desktop-smoke-invalid`, { signal: AbortSignal.timeout(10_000) });
+    if (handoffResponse.status !== 404) throw new Error(`Desktop LAN handoff returned unexpected status ${handoffResponse.status}`);
+  }
 }
 
 function createWindow(origin) {
@@ -145,6 +174,45 @@ function createWindow(origin) {
 
   void window.loadURL(origin);
   return window;
+}
+
+function connectOnlyHandler(appHandler) {
+  return (request, response) => {
+    let pathname = '';
+    try {
+      pathname = new URL(request.url || '/', 'http://handoff.local').pathname;
+    } catch {
+      response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+      response.end('Bad request');
+      return;
+    }
+
+    if (request.method === 'GET' && pathname.startsWith('/connect/')) {
+      return appHandler(request, response);
+    }
+
+    response.writeHead(404, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store'
+    });
+    response.end(JSON.stringify({ error: 'not_found' }));
+  };
+}
+
+function tuneServer(server) {
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 70_000;
+}
+
+function listen(server, host) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    server.once('error', onError);
+    server.listen(0, host, () => {
+      server.off('error', onError);
+      resolve();
+    });
+  });
 }
 
 function isLocalUrl(url, origin) {
