@@ -35,6 +35,14 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run desktop:build
 
+      - name: Execute packaged Windows smoke test
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "dist-desktop/win-unpacked" -Filter "*.exe" | Select-Object -First 1
+          if (-not $exe) { throw 'Packaged Windows executable was not found.' }
+          $process = Start-Process -FilePath $exe.FullName -ArgumentList '--desktop-smoke-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Packaged app smoke test failed with exit code $($process.ExitCode)." }
+
       - name: Create SHA-256 checksum
         shell: pwsh
         run: |
