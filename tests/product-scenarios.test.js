@@ -20,10 +20,11 @@ test('product templates are discoverable and carry ready rules', () => {
   assert.ok(advisor?.rules.some((rule) => rule.intent === 'product-compare'));
 });
 
-test('product scenario resolves deterministic introduction response', () => {
+test('product scenario resolves an AI-assisted grounded introduction rule', () => {
   const scenario = scenarioFromTemplate('product-introduction');
   const bot = { intelligenceMode: 'hybrid', scenario };
   const result = resolveScenario(bot, 'product-intro');
-  assert.match(result.response, /giới thiệu sản phẩm/i);
+  assert.equal(result.useAi, true);
+  assert.match(result.instruction, /product knowledge/i);
   assert.equal(result.handoff, false);
 });
