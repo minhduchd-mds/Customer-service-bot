@@ -31,6 +31,10 @@ export function loadConfig(env = process.env) {
     skillStoreFile: env.SKILL_STORE_FILE || './data/state/skills.json',
     traceLimit: int(env.TRACE_LIMIT, 250),
     conversationMemoryTurns: int(env.CONVERSATION_MEMORY_TURNS, 12),
+    admin: {
+      user: env.BOT_HUB_ADMIN_USER || 'admin',
+      token: env.BOT_HUB_ADMIN_TOKEN || ''
+    },
     connect: {
       ttlSeconds: int(env.CONNECT_SESSION_TTL_SECONDS, 600),
       zaloAuthUrlTemplate: env.CONNECT_ZALO_AUTH_URL_TEMPLATE || '',

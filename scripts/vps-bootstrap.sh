@@ -38,6 +38,7 @@ fi
 
 POSTGRES_PASSWORD="$(random_secret)"
 N8N_ENCRYPTION_KEY="$(random_secret)"
+BOT_HUB_ADMIN_TOKEN="$(random_secret)"
 
 cat > .env <<EOF
 HOST=0.0.0.0
@@ -48,6 +49,13 @@ MAX_BODY_BYTES=1048576
 IDEMPOTENCY_TTL_SECONDS=86400
 BOT_STORE_FILE=/app/data/state/bots.json
 PLATFORM_SETTINGS_FILE=/app/data/state/platform-settings.json
+SKILL_STORE_FILE=/app/data/state/skills.json
+TRACE_LIMIT=250
+CONVERSATION_MEMORY_TURNS=12
+
+BOT_HUB_ADMIN_USER=admin
+BOT_HUB_ADMIN_TOKEN=${BOT_HUB_ADMIN_TOKEN}
+
 KNOWLEDGE_ROOT=/app/data/repos
 KNOWLEDGE_MAX_FILES=2500
 KNOWLEDGE_MAX_FILE_BYTES=262144
@@ -57,11 +65,13 @@ N8N_DOMAIN=${N8N_DOMAIN}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
 
+AI_PROVIDER_NAME=primary
 AI_BASE_URL=
 AI_API_KEY=
 AI_MODEL=
 AI_TIMEOUT_MS=20000
 AI_SYSTEM_PROMPT=You are a concise, helpful customer-service assistant. Never invent order status, price, promotion or policy facts.
+AI_FALLBACKS_JSON=[]
 
 N8N_WEBHOOK_URL=
 N8N_SHARED_SECRET=
@@ -105,6 +115,7 @@ Next steps:
 3. Run: docker compose up -d --build
 4. Check: docker compose ps
 5. Verify: https://${BOT_DOMAIN}/api/health
+6. Open https://${BOT_DOMAIN}; the browser will request Basic authentication. User: admin. Password: BOT_HUB_ADMIN_TOKEN from the local .env file.
 
-Secrets were generated directly into .env and were not printed to stdout.
+Deployment secrets were generated directly into .env and were not printed to stdout.
 EOF
