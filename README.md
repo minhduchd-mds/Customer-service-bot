@@ -34,7 +34,7 @@ Then open `http://localhost:8787`.
 
 ```bash
 cp .env.example .env
-# Set BOT_DOMAIN, N8N_DOMAIN and POSTGRES_PASSWORD before exposing publicly.
+# Replace BOT_DOMAIN, N8N_DOMAIN, POSTGRES_PASSWORD and N8N_ENCRYPTION_KEY before exposing publicly.
 docker compose up -d --build
 ```
 
@@ -43,7 +43,7 @@ See [`docs/VPS-DEPLOY.md`](docs/VPS-DEPLOY.md).
 ## Import a repository into the local knowledge base
 
 ```bash
-./scripts/import-repo.sh https://github.com/owner/repository.git
+bash scripts/import-repo.sh https://github.com/owner/repository.git
 ```
 
 The importer performs a shallow clone into `data/repos/<name>` and removes `.git`. On the next request (or restart), the knowledge index can search supported text/code files and add relevant snippets to the response context. Secrets, binaries and common build directories are excluded.
