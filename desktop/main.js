@@ -3,6 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createApp } from '../src/app.js';
+import { attachConversationPersistence } from '../src/core/conversation-runtime.js';
 import { selectLanAddress } from './network.js';
 
 const APP_NAME = 'Customer Service Bot';
@@ -10,6 +11,7 @@ const SMOKE_TEST = process.argv.includes('--desktop-smoke-test');
 let mainWindow = null;
 let localServer = null;
 let handoffServer = null;
+let embeddedRuntime = null;
 let localOrigin = '';
 
 const gotLock = app.requestSingleInstanceLock();
@@ -32,6 +34,7 @@ app.whenReady().then(async () => {
     const runtime = await startEmbeddedRuntime();
     localServer = runtime.server;
     handoffServer = runtime.handoffServer;
+    embeddedRuntime = runtime.runtime;
     localOrigin = runtime.origin;
 
     if (SMOKE_TEST) {
@@ -40,6 +43,8 @@ app.whenReady().then(async () => {
       await closeServer(localServer);
       handoffServer = null;
       localServer = null;
+      try { embeddedRuntime?.conversations?.close?.(); } catch {}
+      embeddedRuntime = null;
       console.log(JSON.stringify({
         ok: true,
         event: 'desktop_smoke_test_passed',
@@ -72,6 +77,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (handoffServer) handoffServer.close();
   if (localServer) localServer.close();
+  try { embeddedRuntime?.conversations?.close?.(); } catch {}
+  embeddedRuntime = null;
 });
 
 async function startEmbeddedRuntime() {
@@ -85,9 +92,10 @@ async function startEmbeddedRuntime() {
   process.env.BOT_STORE_FILE = path.join(stateDir, 'bots.json');
   process.env.PLATFORM_SETTINGS_FILE = path.join(stateDir, 'platform-settings.json');
   process.env.SKILL_STORE_FILE = path.join(stateDir, 'skills.json');
+  process.env.CONVERSATION_DB_FILE = path.join(stateDir, 'conversations.sqlite');
   process.env.KNOWLEDGE_ROOT = knowledgeDir;
 
-  const runtime = createApp();
+  const runtime = attachConversationPersistence(createApp());
   const server = http.createServer(runtime.handler);
   tuneServer(server);
   await listen(server, '127.0.0.1');
@@ -140,6 +148,11 @@ async function runDesktopSmokeTest(origin, qrOrigin, qrSource) {
   if (!deploymentResponse.ok) throw new Error(`Desktop deployment endpoint returned ${deploymentResponse.status}`);
   const deployment = await deploymentResponse.json();
   if (!deployment?.deployment || typeof deployment?.dockerEnv !== 'string') throw new Error('Desktop deployment payload is invalid');
+
+  const conversationsResponse = await fetch(`${origin}/api/conversations`, { signal: AbortSignal.timeout(10_000) });
+  if (!conversationsResponse.ok) throw new Error(`Desktop conversations endpoint returned ${conversationsResponse.status}`);
+  const conversations = await conversationsResponse.json();
+  if (!Array.isArray(conversations?.conversations)) throw new Error('Desktop conversations payload is invalid');
 
   if (qrSource === 'lan') {
     const handoffResponse = await fetch(`${qrOrigin}/connect/desktop-smoke-invalid`, { signal: AbortSignal.timeout(10_000) });

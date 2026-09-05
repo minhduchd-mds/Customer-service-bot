@@ -31,6 +31,11 @@ export function loadConfig(env = process.env) {
     skillStoreFile: env.SKILL_STORE_FILE || './data/state/skills.json',
     traceLimit: int(env.TRACE_LIMIT, 250),
     conversationMemoryTurns: int(env.CONVERSATION_MEMORY_TURNS, 12),
+    conversations: {
+      file: env.CONVERSATION_DB_FILE || './data/state/conversations.sqlite',
+      retentionDays: int(env.CONVERSATION_RETENTION_DAYS, 30),
+      maxMessageChars: int(env.CONVERSATION_MAX_MESSAGE_CHARS, 8000)
+    },
     admin: {
       user: env.BOT_HUB_ADMIN_USER || 'admin',
       token: env.BOT_HUB_ADMIN_TOKEN || ''

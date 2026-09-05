@@ -40,7 +40,7 @@ POSTGRES_PASSWORD="$(random_secret)"
 N8N_ENCRYPTION_KEY="$(random_secret)"
 BOT_HUB_ADMIN_TOKEN="$(random_secret)"
 
-cat > .env <<EOF
+cat > .env <<EOF_ENV
 HOST=0.0.0.0
 PORT=8787
 PUBLIC_BASE_URL=https://${BOT_DOMAIN}
@@ -52,6 +52,9 @@ PLATFORM_SETTINGS_FILE=/app/data/state/platform-settings.json
 SKILL_STORE_FILE=/app/data/state/skills.json
 TRACE_LIMIT=250
 CONVERSATION_MEMORY_TURNS=12
+CONVERSATION_DB_FILE=/app/data/state/conversations.sqlite
+CONVERSATION_RETENTION_DAYS=30
+CONVERSATION_MAX_MESSAGE_CHARS=8000
 
 BOT_HUB_ADMIN_USER=admin
 BOT_HUB_ADMIN_TOKEN=${BOT_HUB_ADMIN_TOKEN}
@@ -98,12 +101,12 @@ CONNECT_ZALO_AUTH_URL_TEMPLATE=
 CONNECT_FACEBOOK_AUTH_URL_TEMPLATE=
 CONNECT_TIKTOK_AUTH_URL_TEMPLATE=
 CONNECT_TELEGRAM_HELP_URL=https://t.me/BotFather
-EOF
+EOF_ENV
 
 chmod 600 .env
 mkdir -p data/state data/repos
 
-cat <<EOF
+cat <<EOF_MESSAGE
 VPS configuration created.
 
 Bot URL:  https://${BOT_DOMAIN}
@@ -116,6 +119,7 @@ Next steps:
 4. Check: docker compose ps
 5. Verify: https://${BOT_DOMAIN}/api/health
 6. Open https://${BOT_DOMAIN}; the browser will request Basic authentication. User: admin. Password: BOT_HUB_ADMIN_TOKEN from the local .env file.
+7. Back up data/state/conversations.sqlite together with the other Bot Hub state files.
 
 Deployment secrets were generated directly into .env and were not printed to stdout.
-EOF
+EOF_MESSAGE

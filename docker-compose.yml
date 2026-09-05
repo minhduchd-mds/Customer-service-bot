@@ -9,6 +9,7 @@ services:
       PUBLIC_BASE_URL: https://${BOT_DOMAIN:?set BOT_DOMAIN}
       BOT_STORE_FILE: /app/data/state/bots.json
       PLATFORM_SETTINGS_FILE: /app/data/state/platform-settings.json
+      CONVERSATION_DB_FILE: /app/data/state/conversations.sqlite
       KNOWLEDGE_ROOT: /app/data/repos
     volumes:
       - ./data/repos:/app/data/repos:ro
