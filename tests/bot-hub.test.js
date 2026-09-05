@@ -15,6 +15,7 @@ async function withServer(run) {
     PORT: '0',
     PUBLIC_BASE_URL: 'http://127.0.0.1',
     BOT_STORE_FILE: path.join(dir, 'bots.json'),
+    PLATFORM_SETTINGS_FILE: path.join(dir, 'platform-settings.json'),
     CONNECT_SESSION_TTL_SECONDS: '60',
     KNOWLEDGE_ROOT: path.join(dir, 'repos')
   });
@@ -40,11 +41,11 @@ async function request(base, pathname, options = {}) {
   return { response, payload };
 }
 
-test('Bot Hub supports create → connect → teach → go live → simulate', async () => {
+test('Bot Hub supports create → connect → product teach → go live → grounded simulate', async () => {
   await withServer(async ({ base }) => {
     const created = await request(base, '/api/bots', {
       method: 'POST',
-      body: JSON.stringify({ name: 'Sales Bot', purpose: 'sales', intelligenceMode: 'hybrid' })
+      body: JSON.stringify({ name: 'Product Bot', purpose: 'sales', intelligenceMode: 'hybrid' })
     });
     assert.equal(created.response.status, 201);
     const botId = created.payload.bot.id;
@@ -59,14 +60,25 @@ test('Bot Hub supports create → connect → teach → go live → simulate', a
 
     const scenario = await request(base, `/api/bots/${encodeURIComponent(botId)}/scenario`, {
       method: 'PUT',
-      body: JSON.stringify({ template: 'sales' })
+      body: JSON.stringify({ template: 'product-introduction' })
     });
     assert.equal(scenario.response.status, 200);
-    assert.equal(scenario.payload.bot.scenario.template, 'sales');
+    assert.equal(scenario.payload.bot.scenario.template, 'product-introduction');
+    assert.equal(scenario.payload.bot.scenario.rules.some((rule) => rule.useAi), true);
 
     const taught = await request(base, `/api/bots/${encodeURIComponent(botId)}/knowledge`, {
       method: 'POST',
-      body: JSON.stringify({ type: 'text', name: 'Store policy', value: 'Bảo hành 12 tháng.' })
+      body: JSON.stringify({
+        type: 'text',
+        name: 'Product · Kingmart A1',
+        value: [
+          'PRODUCT: Kingmart A1',
+          'INTRODUCTION: Thiết bị hỗ trợ quản lý cửa hàng.',
+          'HIGHLIGHTS_AND_BENEFITS: Thiết lập nhanh; quản lý tập trung.',
+          'CURRENT_PRICE: 8.990.000đ',
+          'CTA: Để lại SĐT để được tư vấn.'
+        ].join('\n')
+      })
     });
     assert.equal(taught.response.status, 201);
     assert.equal(taught.payload.bot.knowledgeSources.length, 1);
@@ -77,11 +89,14 @@ test('Bot Hub supports create → connect → teach → go live → simulate', a
 
     const simulated = await request(base, `/api/bots/${encodeURIComponent(botId)}/simulate`, {
       method: 'POST',
-      body: JSON.stringify({ channel: 'telegram', text: 'Sản phẩm này giá bao nhiêu?' })
+      body: JSON.stringify({ channel: 'telegram', text: 'Giới thiệu sản phẩm này cho tôi' })
     });
     assert.equal(simulated.response.status, 200);
     assert.equal(simulated.payload.accepted, true);
-    assert.equal(simulated.payload.responseSource, 'scenario');
+    assert.equal(simulated.payload.intent, 'product-intro');
+    assert.equal(simulated.payload.responseSource, 'scenario-grounded-fallback');
+    assert.match(simulated.payload.reply, /Kingmart A1/);
+    assert.match(simulated.payload.reply, /8\.990\.000đ/);
     assert.equal(simulated.payload.trace.length, 9);
   });
 });
