@@ -2,7 +2,7 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const roots = ['src', 'scripts', 'tests'];
+const roots = ['src', 'scripts', 'tests', 'public'];
 const files = [];
 for (const root of roots) await walk(root);
 let failed = false;
