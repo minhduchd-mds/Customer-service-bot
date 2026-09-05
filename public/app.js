@@ -2,6 +2,7 @@ const state = {
   view: 'home',
   bots: [],
   templates: [],
+  deploymentData: null,
   selectedBotId: null,
   botTab: 'overview',
   wizard: null,
@@ -23,7 +24,7 @@ const channelMeta = {
 };
 
 const purposeMeta = {
-  sales: ['Sales', 'Tư vấn sản phẩm, báo giá và tạo lead.'],
+  sales: ['Sales / Product', 'Giới thiệu, tư vấn sản phẩm, báo giá và tạo lead.'],
   'customer-care': ['Customer Care', 'FAQ, chăm sóc và chuyển nhân viên khi cần.'],
   support: ['Support', 'Tiếp nhận lỗi, hướng dẫn và escalation.'],
   custom: ['Custom', 'Tự mô tả mục tiêu và hành vi của bot.']
@@ -47,7 +48,7 @@ async function api(path, options = {}) {
 
 async function boot() {
   bindGlobalEvents();
-  await Promise.all([refreshHealth(), loadBots(), loadTemplates()]);
+  await Promise.all([refreshHealth(), loadBots(), loadTemplates(), loadDeployment()]);
   render();
 }
 
@@ -76,8 +77,17 @@ async function loadTemplates() {
   }
 }
 
+async function loadDeployment() {
+  try {
+    state.deploymentData = await api('/api/deployment');
+  } catch {
+    state.deploymentData = null;
+  }
+}
+
 function bindGlobalEvents() {
   document.querySelector('#new-bot').addEventListener('click', openWizard);
+
   document.body.addEventListener('click', async (event) => {
     const nav = event.target.closest('[data-nav]');
     if (nav) {
@@ -109,6 +119,8 @@ async function handleAction(action, element) {
   if (action === 'close-modal') return closeModal();
   if (action === 'wizard-purpose') {
     state.wizard.purpose = element.dataset.value;
+    if (state.wizard.purpose === 'sales') state.wizard.scenarioTemplate = 'product-introduction';
+    else if (state.wizard.purpose === 'support' || state.wizard.purpose === 'customer-care') state.wizard.scenarioTemplate = 'support';
     return renderWizard();
   }
   if (action === 'wizard-mode') {
@@ -154,17 +166,20 @@ async function handleAction(action, element) {
     state.wizard.bot = getSelectedBot();
     return renderWizard();
   }
+  if (action === 'save-deployment') return saveDeployment();
+  if (action === 'copy-deployment-env') return copyDeploymentEnv();
 }
 
 function render() {
   if (state.view === 'bot-detail') return renderBotDetail();
   if (state.view === 'home' || state.view === 'bots') return renderHome();
+  if (state.view === 'settings') return renderSettings();
+
   const titles = {
     conversations: ['Inbox', 'Conversations'],
     customers: ['CRM', 'Customers'],
     automations: ['Workflow', 'Automations'],
-    analytics: ['Insights', 'Analytics'],
-    settings: ['Workspace', 'Settings']
+    analytics: ['Insights', 'Analytics']
   };
   const [eyebrow, title] = titles[state.view] || ['Workspace', 'Bot Hub'];
   pageEyebrow.textContent = eyebrow;
@@ -184,10 +199,10 @@ function renderHome() {
       <article class="glass-card hero-copy">
         <p class="eyebrow">Bot Hub</p>
         <h2>Create. Connect. Teach. Go live.</h2>
-        <p>Tạo nhiều bot độc lập cho bán hàng và chăm sóc khách hàng. Người vận hành chỉ nhìn thấy luồng đơn giản; Router9, webhook, AI routing và n8n chạy phía sau.</p>
+        <p>Tạo nhiều bot độc lập cho bán hàng và chăm sóc khách hàng. Router9, webhook, AI routing, Product Scenario và n8n chạy phía sau.</p>
         <div class="hero-actions">
           <button class="primary-button" data-action="new-bot">＋ Create Bot</button>
-          <button class="secondary-button" data-nav="bots">View all bots</button>
+          <button class="secondary-button" data-nav="settings">Deployment setup</button>
         </div>
       </article>
       <article class="glass-card metric-stack">
@@ -199,11 +214,101 @@ function renderHome() {
     </section>
 
     <div class="section-head">
-      <div><h2>${state.view === 'bots' ? 'All bots' : 'Your bots'}</h2><p>Mỗi bot có channels, intelligence và knowledge riêng.</p></div>
+      <div><h2>${state.view === 'bots' ? 'All bots' : 'Your bots'}</h2><p>Mỗi bot có channels, intelligence, product knowledge và scenario riêng.</p></div>
       ${state.bots.length ? '<button class="secondary-button" data-action="new-bot">＋ New Bot</button>' : ''}
     </div>
     ${state.bots.length ? `<section class="bots-grid">${state.bots.map(botCard).join('')}</section>` : emptyBots()}
   `;
+}
+
+function renderSettings() {
+  pageEyebrow.textContent = 'Workspace / Infrastructure';
+  pageTitle.textContent = 'Deployment';
+  const data = state.deploymentData;
+  if (!data) {
+    view.innerHTML = '<section class="placeholder"><h2>Deployment settings unavailable</h2><p>Không đọc được cấu hình deployment từ backend.</p></section>';
+    return;
+  }
+
+  const d = data.deployment || {};
+  const readiness = d.publicReady ? ['green', 'Public HTTPS active'] : d.draftReady ? ['orange', 'VPS draft ready'] : ['orange', 'Desktop / LAN'];
+  view.innerHTML = `
+    <div class="split">
+      <section class="panel">
+        <p class="eyebrow">Connection mode</p>
+        <h2>${escapeHtml(readiness[1])}</h2>
+        <p class="subtle">Desktop dùng LAN cho QR test. Zalo/Meta/TikTok production nên chạy Bot Hub trên VPS với domain HTTPS công khai.</p>
+        <div class="list">
+          <div class="list-row"><div><strong>Runtime Public URL</strong><small>Giá trị PUBLIC_BASE_URL đang active</small></div><span class="tag ${d.publicReady ? 'green' : 'orange'}">${escapeHtml(d.activePublicBaseUrl || 'Not active')}</span></div>
+          <div class="list-row"><div><strong>QR mode</strong><small>Địa chỉ QR hiện tại sẽ dùng</small></div><span class="tag blue">${escapeHtml(d.qrMode || 'desktop-lan')}</span></div>
+          <div class="list-row"><div><strong>Restart / deploy required</strong><small>Draft chỉ có hiệu lực sau khi đưa vào VPS .env</small></div><span class="tag ${d.requiresRestartOrDeploy ? 'orange' : 'green'}">${d.requiresRestartOrDeploy ? 'Yes' : 'No'}</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <p class="eyebrow">VPS target</p>
+        <h2>Docker + Caddy</h2>
+        <div class="field"><label>Mode</label><select class="select" id="deploy-mode"><option value="desktop-lan" ${d.mode === 'desktop-lan' ? 'selected' : ''}>Desktop / LAN</option><option value="vps-docker" ${d.mode === 'vps-docker' ? 'selected' : ''}>Docker VPS / HTTPS</option></select></div>
+        <div class="field"><label>VPS host / IP</label><input class="input" id="deploy-vps-host" value="${escapeAttr(d.vpsHost || '')}" placeholder="203.0.113.10"></div>
+        <div class="choice-grid">
+          <div class="field"><label>SSH user</label><input class="input" id="deploy-ssh-user" value="${escapeAttr(d.sshUser || 'root')}"></div>
+          <div class="field"><label>SSH port</label><input class="input" id="deploy-ssh-port" type="number" min="1" max="65535" value="${Number(d.sshPort || 22)}"></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:18px">
+      <p class="eyebrow">Public endpoints</p>
+      <h2>Domains & callback</h2>
+      <div class="choice-grid">
+        <div class="field"><label>Bot domain</label><input class="input" id="deploy-bot-domain" value="${escapeAttr(d.botDomain || '')}" placeholder="bot.example.com"></div>
+        <div class="field"><label>n8n domain</label><input class="input" id="deploy-n8n-domain" value="${escapeAttr(d.n8nDomain || '')}" placeholder="n8n.example.com"></div>
+      </div>
+      <div class="field"><label>Public Base URL</label><input class="input" id="deploy-public-url" value="${escapeAttr(d.publicBaseUrl || '')}" placeholder="https://bot.example.com"><small>Đây là draft trong app. VPS runtime chỉ được coi là active khi PUBLIC_BASE_URL được áp dụng vào .env và server khởi động lại.</small></div>
+      <div class="hero-actions"><button class="primary-button" data-action="save-deployment">Save deployment draft</button><button class="secondary-button" data-action="copy-deployment-env">Copy .env template</button></div>
+    </section>
+
+    <section class="panel" style="margin-top:18px">
+      <p class="eyebrow">One-time VPS bootstrap</p>
+      <h2>Deploy commands</h2>
+      <div class="code-box">${escapeHtml(Object.values(data.commands || {}).join('\n'))}</div>
+      <p class="connect-note">${escapeHtml(data.note || '')}</p>
+      <p class="connect-note">Không lưu SSH password/API secrets ở màn này. Provider token chỉ đặt trong file <strong>.env</strong> trên VPS hoặc secret manager.</p>
+    </section>`;
+}
+
+async function saveDeployment() {
+  const payload = {
+    mode: document.querySelector('#deploy-mode')?.value,
+    vpsHost: document.querySelector('#deploy-vps-host')?.value,
+    sshUser: document.querySelector('#deploy-ssh-user')?.value,
+    sshPort: Number(document.querySelector('#deploy-ssh-port')?.value || 22),
+    botDomain: document.querySelector('#deploy-bot-domain')?.value,
+    n8nDomain: document.querySelector('#deploy-n8n-domain')?.value,
+    publicBaseUrl: document.querySelector('#deploy-public-url')?.value
+  };
+  state.deploymentData = await api('/api/deployment', { method: 'PATCH', body: JSON.stringify(payload) });
+  renderSettings();
+  toast('Deployment draft saved');
+}
+
+async function copyDeploymentEnv() {
+  const value = state.deploymentData?.dockerEnv || '';
+  if (!value) throw new Error('No deployment template available');
+  if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
+  else fallbackCopy(value);
+  toast('.env template copied');
+}
+
+function fallbackCopy(value) {
+  const area = document.createElement('textarea');
+  area.value = value;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.append(area);
+  area.select();
+  document.execCommand('copy');
+  area.remove();
 }
 
 function botCard(bot) {
@@ -212,22 +317,16 @@ function botCard(bot) {
     : '<span class="channel-chip">No channel yet</span>';
   return `
     <article class="bot-card" data-action="open-bot" data-bot-id="${escapeHtml(bot.id)}" tabindex="0">
-      <div class="bot-top">
-        <div class="bot-icon">⌁</div>
-        <span class="status-dot ${escapeHtml(bot.status)}"><i></i>${escapeHtml(capitalize(bot.status))}</span>
-      </div>
+      <div class="bot-top"><div class="bot-icon">⌁</div><span class="status-dot ${escapeHtml(bot.status)}"><i></i>${escapeHtml(capitalize(bot.status))}</span></div>
       <h3>${escapeHtml(bot.name)}</h3>
       <p class="purpose">${escapeHtml(purposeMeta[bot.purpose]?.[0] || bot.purpose)} · ${escapeHtml(modeMeta[bot.intelligenceMode]?.[1] || bot.intelligenceMode)}</p>
       <div class="channel-row">${channelHtml}</div>
-      <div class="bot-stats">
-        <div><strong>${bot.knowledgeSources?.length || 0}</strong><span>Knowledge</span></div>
-        <div><strong>${bot.scenario?.rules?.length || 0}</strong><span>Scenario rules</span></div>
-      </div>
+      <div class="bot-stats"><div><strong>${bot.knowledgeSources?.length || 0}</strong><span>Knowledge</span></div><div><strong>${bot.scenario?.rules?.length || 0}</strong><span>Scenario rules</span></div></div>
     </article>`;
 }
 
 function emptyBots() {
-  return `<section class="empty-state"><div class="empty-icon">⌁</div><h3>Create your first bot</h3><p>Chỉ 4 bước: đặt tên → kết nối kênh → nạp kiến thức/kịch bản → bật chạy.</p><button class="primary-button" data-action="new-bot">＋ Create Bot</button></section>`;
+  return `<section class="empty-state"><div class="empty-icon">⌁</div><h3>Create your first bot</h3><p>Đặt tên → kết nối kênh → nạp Product/Knowledge → chọn Scenario/AI → bật chạy.</p><button class="primary-button" data-action="new-bot">＋ Create Bot</button></section>`;
 }
 
 function openWizard() {
@@ -239,7 +338,11 @@ function openWizard() {
     intelligenceMode: 'hybrid',
     scenarioTemplate: 'support',
     knowledge: '',
-    knowledgeType: 'text',
+    productName: '',
+    productSummary: '',
+    productBenefits: '',
+    productPrice: '',
+    productCta: '',
     bot: null,
     qr: null
   };
@@ -257,30 +360,25 @@ function renderWizard() {
   modalRoot.innerHTML = `
     <div class="modal-backdrop">
       <section class="modal" role="dialog" aria-modal="true" aria-label="Create bot">
-        <header class="modal-head">
-          <div><p class="eyebrow">New Bot</p><h2>${wizardTitle(w.step)}</h2><p>${wizardSubtitle(w.step)}</p></div>
-          <button class="icon-button" data-action="close-modal" aria-label="Close">×</button>
-        </header>
+        <header class="modal-head"><div><p class="eyebrow">New Bot</p><h2>${wizardTitle(w.step)}</h2><p>${wizardSubtitle(w.step)}</p></div><button class="icon-button" data-action="close-modal" aria-label="Close">×</button></header>
         <div class="steps">${[1,2,3,4].map((step) => `<i class="step ${step < w.step ? 'done' : step === w.step ? 'active' : ''}"></i>`).join('')}</div>
         <div class="wizard-body">${wizardBody(w)}</div>
-        <footer class="wizard-footer">
-          <button class="ghost-button" data-action="wizard-back" ${w.step === 1 ? 'disabled' : ''}>Back</button>
-          ${w.step < 4 ? `<button class="primary-button" data-action="wizard-next">${w.step === 1 ? 'Create & continue' : 'Continue'}</button>` : `<button class="primary-button" data-action="wizard-go-live">Go Live</button>`}
-        </footer>
+        <footer class="wizard-footer"><button class="ghost-button" data-action="wizard-back" ${w.step === 1 ? 'disabled' : ''}>Back</button>${w.step < 4 ? `<button class="primary-button" data-action="wizard-next">${w.step === 1 ? 'Create & continue' : 'Continue'}</button>` : `<button class="primary-button" data-action="wizard-go-live">Go Live</button>`}</footer>
       </section>
     </div>`;
 }
 
 function wizardTitle(step) {
-  return ['','Create your bot','Connect customers','Teach your bot','Ready to go live'][step];
+  return ['', 'Create your bot', 'Connect customers', 'Teach your bot', 'Ready to go live'][step];
 }
+
 function wizardSubtitle(step) {
-  return ['','Đặt mục tiêu trước, phần kỹ thuật để hệ thống xử lý.','Chọn kênh. QR chỉ là handoff an toàn sang luồng cấp quyền chính thức.','Chọn AI, kịch bản hoặc Hybrid và nạp knowledge.','Kiểm tra nhanh cấu hình trước khi bật bot.'][step];
+  return ['', 'Đặt mục tiêu trước, phần kỹ thuật để hệ thống xử lý.', 'Chọn channel. Desktop test bằng LAN; production OAuth/webhook dùng VPS HTTPS.', 'Nạp Product Knowledge và chọn AI / Scenario / Hybrid.', 'Kiểm tra nhanh trước khi bật bot.'][step];
 }
 
 function wizardBody(w) {
   if (w.step === 1) return `
-    <div class="field"><label>Bot name</label><input class="input" data-wizard-field="name" value="${escapeAttr(w.name)}" placeholder="Kingmart Sales" maxlength="80"></div>
+    <div class="field"><label>Bot name</label><input class="input" data-wizard-field="name" value="${escapeAttr(w.name)}" placeholder="Kingmart Product Bot" maxlength="80"></div>
     <div class="field"><label>What should this bot do?</label><div class="choice-grid">${Object.entries(purposeMeta).map(([id,[name,desc]]) => `<button class="choice-card ${w.purpose === id ? 'selected' : ''}" data-action="wizard-purpose" data-value="${id}"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(desc)}</span></button>`).join('')}</div></div>
     <div class="field"><label>Description <span class="subtle">optional</span></label><textarea class="textarea" data-wizard-field="description" placeholder="Mục tiêu và phạm vi của bot...">${escapeHtml(w.description)}</textarea></div>`;
 
@@ -289,25 +387,19 @@ function wizardBody(w) {
     return `
       <div class="choice-grid">${Object.entries(channelMeta).map(([id,meta]) => {
         const connection = bot?.channels?.find((item) => item.channel === id);
-        return `<button class="channel-choice ${connection ? 'selected' : ''} ${connection?.status === 'connected' ? 'connected' : ''}" data-action="wizard-connect" data-channel="${id}">
-          <span class="connect-state">${escapeHtml(connection?.status?.replaceAll('_',' ') || 'Connect')}</span>
-          <span class="channel-logo">${escapeHtml(meta.mark)}</span><strong>${escapeHtml(meta.label)}</strong><span>${id === 'web' ? 'Tạo Web Chat ngay.' : 'QR handoff → official authorization.'}</span>
-        </button>`;
+        return `<button class="channel-choice ${connection ? 'selected' : ''} ${connection?.status === 'connected' ? 'connected' : ''}" data-action="wizard-connect" data-channel="${id}"><span class="connect-state">${escapeHtml(connection?.status?.replaceAll('_',' ') || 'Connect')}</span><span class="channel-logo">${escapeHtml(meta.mark)}</span><strong>${escapeHtml(meta.label)}</strong><span>${id === 'web' ? 'Tạo Web Chat ngay.' : 'QR handoff → authorization.'}</span></button>`;
       }).join('')}</div>
-      ${w.qr ? qrPanel(w.qr) : '<p class="connect-note" style="margin-top:18px">Zalo/Facebook/TikTok chỉ được đánh dấu Connected sau khi adapter OAuth/token exchange chính thức hoàn tất. Bot Hub không dùng cookie/session cá nhân.</p>'}`;
+      ${w.qr ? qrPanel(w.qr) : `<p class="connect-note" style="margin-top:18px">Desktop QR dùng IP LAN để điện thoại cùng Wi‑Fi truy cập. Zalo/Facebook/TikTok production cần Bot Hub trên VPS HTTPS + OAuth/token exchange chính thức.</p>`}`;
   }
 
-  if (w.step === 3) return `
-    <div class="field"><label>How should your bot work?</label><div class="mode-grid">${Object.entries(modeMeta).map(([id,[icon,name,desc]]) => `<button class="mode-card ${w.intelligenceMode === id ? 'selected' : ''}" data-action="wizard-mode" data-value="${id}"><div class="mode-icon">${icon}</div><strong>${name}</strong><span>${desc}</span>${id === 'hybrid' ? '<em class="recommended">RECOMMENDED</em>' : ''}</button>`).join('')}</div></div>
-    <div class="teach-grid">
-      <div>
-        <div class="field"><label>Scenario template</label><div class="choice-grid">${state.templates.map((template) => `<button class="template-card ${w.scenarioTemplate === template.id ? 'selected' : ''}" data-action="wizard-template" data-value="${escapeAttr(template.id)}"><strong>${escapeHtml(template.name)}</strong><span>${template.rules.length} ready rules</span></button>`).join('') || '<span class="subtle">No templates loaded</span>'}</div></div>
-      </div>
-      <div>
-        <div class="field"><label>Teach with text / FAQ / policy</label><textarea class="textarea" data-wizard-field="knowledge" placeholder="Ví dụ: Shop mở cửa 8:00–21:00. Khi khách hỏi bảo hành...">${escapeHtml(w.knowledge)}</textarea><small>Repo, URL và document metadata cũng được hỗ trợ qua Bot API. Nội dung text được lưu riêng cho bot.</small></div>
-        <div class="upload-zone">PDF · DOCX · XLSX · URL · Repository<br><small>File parser UI sẽ nằm ở vòng tiếp theo; kiến trúc source đã tách theo bot.</small></div>
-      </div>
-    </div>`;
+  if (w.step === 3) {
+    const showProduct = w.purpose === 'sales' || String(w.scenarioTemplate).startsWith('product');
+    return `
+      <div class="field"><label>How should your bot work?</label><div class="mode-grid">${Object.entries(modeMeta).map(([id,[icon,name,desc]]) => `<button class="mode-card ${w.intelligenceMode === id ? 'selected' : ''}" data-action="wizard-mode" data-value="${id}"><div class="mode-icon">${icon}</div><strong>${name}</strong><span>${desc}</span>${id === 'hybrid' ? '<em class="recommended">RECOMMENDED</em>' : ''}</button>`).join('')}</div></div>
+      <div class="field"><label>Scenario template</label><div class="choice-grid">${state.templates.map(templateCard).join('') || '<span class="subtle">No templates loaded</span>'}</div></div>
+      ${showProduct ? productSetup(w) : ''}
+      <div class="field"><label>Additional Knowledge / FAQ / Policy</label><textarea class="textarea" data-wizard-field="knowledge" placeholder="Ví dụ: Chính sách bảo hành, giao hàng, điều kiện đổi trả...">${escapeHtml(w.knowledge)}</textarea><small>Nội dung được lưu riêng theo bot. AI không được tự bịa giá, khuyến mại hoặc chính sách thiếu nguồn.</small></div>`;
+  }
 
   const bot = w.bot || {};
   return `<div class="summary-card">
@@ -316,15 +408,27 @@ function wizardBody(w) {
     <div class="summary-row"><span>Channels</span><strong>${bot.channels?.length || 0}</strong></div>
     <div class="summary-row"><span>Intelligence</span><strong>${escapeHtml(modeMeta[bot.intelligenceMode || w.intelligenceMode]?.[1] || '')}</strong></div>
     <div class="summary-row"><span>Knowledge</span><strong>${bot.knowledgeSources?.length || 0} sources</strong></div>
-    <div class="summary-row"><span>Scenario</span><strong>${bot.scenario?.rules?.length || 0} rules</strong></div>
-  </div><p class="connect-note" style="margin-top:18px">Go Live bật trạng thái bot. Channel có OAuth pending vẫn phải hoàn tất authorization/token exchange trước khi outbound production được phép.</p>`;
+    <div class="summary-row"><span>Scenario</span><strong>${escapeHtml(bot.scenario?.template || w.scenarioTemplate || 'none')} · ${bot.scenario?.rules?.length || 0} rules</strong></div>
+  </div><p class="connect-note" style="margin-top:18px">Go Live bật bot. Channel OAuth pending vẫn phải hoàn tất token exchange trước khi outbound production được phép.</p>`;
+}
+
+function templateCard(template) {
+  return `<button class="template-card ${state.wizard?.scenarioTemplate === template.id ? 'selected' : ''}" data-action="wizard-template" data-value="${escapeAttr(template.id)}"><span class="tag blue">${escapeHtml(template.category || 'General')}</span><strong style="margin-top:10px">${escapeHtml(template.name)}</strong><span>${escapeHtml(template.description || '')}</span><small style="display:block;margin-top:8px;color:#86868b">${template.rules.length} ready rules</small></button>`;
+}
+
+function productSetup(w) {
+  return `<section class="panel" style="margin:18px 0;background:rgba(248,248,250,.72)">
+    <p class="eyebrow">Product quick setup</p><h3>Giới thiệu sản phẩm</h3><p class="subtle">Nhập dữ liệu thật của sản phẩm. Bot sẽ dùng nó làm Product Knowledge cho kịch bản giới thiệu/tư vấn.</p>
+    <div class="choice-grid"><div class="field"><label>Product name</label><input class="input" data-wizard-field="productName" value="${escapeAttr(w.productName)}" placeholder="Kingmart A1"></div><div class="field"><label>Current price</label><input class="input" data-wizard-field="productPrice" value="${escapeAttr(w.productPrice)}" placeholder="8.990.000đ"></div></div>
+    <div class="field"><label>Short introduction</label><textarea class="textarea" data-wizard-field="productSummary" placeholder="Sản phẩm là gì, giải quyết nhu cầu nào...">${escapeHtml(w.productSummary)}</textarea></div>
+    <div class="field"><label>Highlights / benefits</label><textarea class="textarea" data-wizard-field="productBenefits" placeholder="Điểm nổi bật, lợi ích, đối tượng phù hợp...">${escapeHtml(w.productBenefits)}</textarea></div>
+    <div class="field"><label>CTA</label><input class="input" data-wizard-field="productCta" value="${escapeAttr(w.productCta)}" placeholder="Để lại SĐT để tư vấn viên liên hệ"></div>
+  </section>`;
 }
 
 function qrPanel(qr) {
-  return `<div class="qr-layout">
-    <div class="qr-box">${qr.svg || '<span>QR unavailable</span>'}</div>
-    <div><p class="eyebrow">Scan on phone</p><h3>Connect ${escapeHtml(channelMeta[qr.channel]?.label || qr.channel)}</h3><p class="subtle">QR chứa URL tạm thời, không chứa access token. Scan để mở handoff page trên điện thoại.</p><div class="connection-url">${escapeHtml(qr.url)}</div><div style="display:flex;gap:8px;margin-top:14px"><a class="primary-button" href="${escapeAttr(qr.url)}" target="_blank" rel="noreferrer" style="text-decoration:none">Open link</a><button class="secondary-button" data-action="wizard-close-qr">Done</button></div></div>
-  </div>`;
+  const publicHttps = String(qr.url || '').startsWith('https://');
+  return `<div class="qr-layout"><div class="qr-box">${qr.svg || '<span>QR unavailable</span>'}</div><div><p class="eyebrow">Scan on phone</p><h3>Connect ${escapeHtml(channelMeta[qr.channel]?.label || qr.channel)}</h3><p class="subtle">${publicHttps ? 'Public HTTPS handoff.' : 'LAN handoff: điện thoại và máy Windows cần cùng mạng Wi‑Fi/LAN.'} QR không chứa access token.</p><div class="connection-url">${escapeHtml(qr.url)}</div><div style="display:flex;gap:8px;margin-top:14px"><a class="primary-button" href="${escapeAttr(qr.url)}" target="_blank" rel="noreferrer" style="text-decoration:none">Open link</a><button class="secondary-button" data-action="wizard-close-qr">Done</button></div></div></div>`;
 }
 
 async function wizardNext() {
@@ -345,12 +449,36 @@ async function wizardNext() {
   if (w.step === 3) {
     let updated = (await api(`/api/bots/${encodeURIComponent(w.bot.id)}`, { method: 'PATCH', body: JSON.stringify({ intelligenceMode: w.intelligenceMode }) })).bot;
     if (w.scenarioTemplate) updated = (await api(`/api/bots/${encodeURIComponent(w.bot.id)}/scenario`, { method: 'PUT', body: JSON.stringify({ template: w.scenarioTemplate }) })).bot;
-    if (w.knowledge.trim()) updated = (await api(`/api/bots/${encodeURIComponent(w.bot.id)}/knowledge`, { method: 'POST', body: JSON.stringify({ type: 'text', name: 'Onboarding knowledge', value: w.knowledge }) })).bot;
+
+    const productKnowledge = buildProductKnowledge(w);
+    if (productKnowledge) {
+      updated = (await api(`/api/bots/${encodeURIComponent(w.bot.id)}/knowledge`, { method: 'POST', body: JSON.stringify({ type: 'text', name: `Product · ${w.productName || 'Catalog'}`, value: productKnowledge }) })).bot;
+    }
+    if (w.knowledge.trim()) {
+      updated = (await api(`/api/bots/${encodeURIComponent(w.bot.id)}/knowledge`, { method: 'POST', body: JSON.stringify({ type: 'text', name: 'Business knowledge', value: w.knowledge }) })).bot;
+    }
+
     w.bot = updated;
     await loadBots();
     w.step = 4;
     return renderWizard();
   }
+}
+
+function buildProductKnowledge(w) {
+  if (![w.productName, w.productSummary, w.productBenefits, w.productPrice, w.productCta].some((value) => String(value || '').trim())) return '';
+  return [
+    `PRODUCT: ${w.productName || 'Unnamed product'}`,
+    `INTRODUCTION: ${w.productSummary || 'Not provided'}`,
+    `HIGHLIGHTS_AND_BENEFITS: ${w.productBenefits || 'Not provided'}`,
+    `CURRENT_PRICE: ${w.productPrice || 'Not provided'}`,
+    `CTA: ${w.productCta || 'Offer human sales assistance when the customer is interested.'}`,
+    '',
+    'RULES:',
+    '- Never invent price, promotion, stock, warranty or product specifications.',
+    '- If a requested fact is missing, say the business data does not contain it yet.',
+    '- Explain benefits in relation to the customer need instead of only listing specifications.'
+  ].join('\n');
 }
 
 async function connectChannel(channel) {
@@ -397,32 +525,16 @@ function renderBotDetail() {
   pageEyebrow.textContent = 'Bots / Detail';
   pageTitle.textContent = bot.name;
   const tabs = ['overview','conversations','knowledge','automation','settings'];
-  view.innerHTML = `
-    <div class="bot-detail-head">
-      <div class="bot-detail-title"><button class="icon-button" data-action="back-bots">‹</button><div><h2>${escapeHtml(bot.name)}</h2><p class="subtle">${escapeHtml(purposeMeta[bot.purpose]?.[0] || bot.purpose)} · ${escapeHtml(modeMeta[bot.intelligenceMode]?.[1] || bot.intelligenceMode)}</p></div></div>
-      <button class="primary-button" data-action="quick-connect">＋ Connect</button>
-    </div>
-    <div class="tabs">${tabs.map((tab) => `<button class="tab ${state.botTab === tab ? 'active' : ''}" data-action="bot-tab" data-tab="${tab}">${capitalize(tab)}</button>`).join('')}</div>
-    ${botTabContent(bot)}
-  `;
+  view.innerHTML = `<div class="bot-detail-head"><div class="bot-detail-title"><button class="icon-button" data-action="back-bots">‹</button><div><h2>${escapeHtml(bot.name)}</h2><p class="subtle">${escapeHtml(purposeMeta[bot.purpose]?.[0] || bot.purpose)} · ${escapeHtml(modeMeta[bot.intelligenceMode]?.[1] || bot.intelligenceMode)}</p></div></div><button class="primary-button" data-action="quick-connect">＋ Connect</button></div><div class="tabs">${tabs.map((tab) => `<button class="tab ${state.botTab === tab ? 'active' : ''}" data-action="bot-tab" data-tab="${tab}">${capitalize(tab)}</button>`).join('')}</div>${botTabContent(bot)}`;
 }
 
 function botTabContent(bot) {
   if (state.botTab === 'overview') return `
-    <div class="split">
-      <section class="panel"><p class="eyebrow">Status</p><h2>${capitalize(bot.status)}</h2><p class="subtle">${escapeHtml(bot.description || 'No description yet.')}</p>
-        <div class="list">
-          <div class="list-row"><div><strong>Intelligence</strong><small>AI / scenario routing strategy</small></div><span class="tag blue">${escapeHtml(modeMeta[bot.intelligenceMode]?.[1] || bot.intelligenceMode)}</span></div>
-          <div class="list-row"><div><strong>Knowledge</strong><small>Bot-specific teaching sources</small></div><span class="tag">${bot.knowledgeSources?.length || 0} sources</span></div>
-          <div class="list-row"><div><strong>Scenario</strong><small>Deterministic response rules</small></div><span class="tag">${bot.scenario?.rules?.length || 0} rules</span></div>
-        </div>
-      </section>
-      <section class="panel"><p class="eyebrow">Channels</p><h2>${bot.channels.length || 0} connected/setup</h2><div class="list">${bot.channels.length ? bot.channels.map(channelListRow).join('') : '<p class="subtle">No channels yet. Use Connect to create QR handoff or Web Chat.</p>'}</div></section>
-    </div>
-    <section class="panel" style="margin-top:18px"><p class="eyebrow">Test before production</p><h2>Router9 Simulator</h2><div class="simulator"><div class="sim-row"><select class="select" id="sim-channel">${Object.keys(channelMeta).filter((x)=>x!=='web').map((id)=>`<option value="${id}">${channelMeta[id].label}</option>`).join('')}</select><input class="input" id="sim-message" value="Tôi muốn hỏi giá sản phẩm"><button class="primary-button" data-action="simulate">Run</button></div>${simulationHtml()}</div></section>`;
-  if (state.botTab === 'knowledge') return `<section class="panel"><p class="eyebrow">Knowledge</p><h2>${bot.knowledgeSources?.length || 0} sources</h2><div class="list">${bot.knowledgeSources?.length ? bot.knowledgeSources.map((source) => `<div class="list-row"><div><strong>${escapeHtml(source.name)}</strong><small>${escapeHtml(source.type)} · ${escapeHtml(String(source.value).slice(0,110))}</small></div><span class="tag green">${escapeHtml(source.status)}</span></div>`).join('') : '<p class="subtle">No bot-specific knowledge. Use the Create/Teach flow or Bot API to add text, URL, document or repository metadata.</p>'}</div></section>`;
-  if (state.botTab === 'settings') return `<section class="panel"><p class="eyebrow">Settings</p><h2>Bot profile</h2><div class="list"><div class="list-row"><div><strong>Purpose</strong><small>Primary business goal</small></div><span class="tag">${escapeHtml(bot.purpose)}</span></div><div class="list-row"><div><strong>Model routing</strong><small>Advanced provider details stay behind the simple UI</small></div><span class="tag blue">${escapeHtml(bot.ai?.modelMode || 'automatic')}</span></div><div class="list-row"><div><strong>Human handoff threshold</strong><small>Confidence lower than this should leave autopilot</small></div><span class="tag">${Math.round((bot.ai?.handoffConfidenceBelow || .7)*100)}%</span></div></div></section>`;
-  return `<section class="placeholder"><h2>${capitalize(state.botTab)}</h2><p>Information architecture đã chuẩn bị. Module nghiệp vụ này sẽ dùng chung botId/workspaceId thay vì tạo menu kỹ thuật rời rạc.</p></section>`;
+    <div class="split"><section class="panel"><p class="eyebrow">Status</p><h2>${capitalize(bot.status)}</h2><p class="subtle">${escapeHtml(bot.description || 'No description yet.')}</p><div class="list"><div class="list-row"><div><strong>Intelligence</strong><small>AI / scenario routing strategy</small></div><span class="tag blue">${escapeHtml(modeMeta[bot.intelligenceMode]?.[1] || bot.intelligenceMode)}</span></div><div class="list-row"><div><strong>Knowledge</strong><small>Bot-specific product/business sources</small></div><span class="tag">${bot.knowledgeSources?.length || 0} sources</span></div><div class="list-row"><div><strong>Scenario</strong><small>${escapeHtml(bot.scenario?.template || 'Custom')}</small></div><span class="tag">${bot.scenario?.rules?.length || 0} rules</span></div></div></section><section class="panel"><p class="eyebrow">Channels</p><h2>${bot.channels.length || 0} connected/setup</h2><div class="list">${bot.channels.length ? bot.channels.map(channelListRow).join('') : '<p class="subtle">No channels yet.</p>'}</div></section></div>
+    <section class="panel" style="margin-top:18px"><p class="eyebrow">Test before production</p><h2>Router9 Simulator</h2><div class="simulator"><div class="sim-row"><select class="select" id="sim-channel">${Object.keys(channelMeta).filter((x)=>x!=='web').map((id)=>`<option value="${id}">${channelMeta[id].label}</option>`).join('')}</select><input class="input" id="sim-message" value="Giới thiệu sản phẩm này cho tôi"><button class="primary-button" data-action="simulate">Run</button></div>${simulationHtml()}</div></section>`;
+  if (state.botTab === 'knowledge') return `<section class="panel"><p class="eyebrow">Knowledge</p><h2>${bot.knowledgeSources?.length || 0} sources</h2><div class="list">${bot.knowledgeSources?.length ? bot.knowledgeSources.map((source) => `<div class="list-row"><div><strong>${escapeHtml(source.name)}</strong><small>${escapeHtml(source.type)} · ${escapeHtml(String(source.value).slice(0,130))}</small></div><span class="tag green">${escapeHtml(source.status)}</span></div>`).join('') : '<p class="subtle">No product/business knowledge yet.</p>'}</div></section>`;
+  if (state.botTab === 'settings') return `<section class="panel"><p class="eyebrow">Settings</p><h2>Bot profile</h2><div class="list"><div class="list-row"><div><strong>Purpose</strong><small>Primary business goal</small></div><span class="tag">${escapeHtml(bot.purpose)}</span></div><div class="list-row"><div><strong>Scenario</strong><small>Published deterministic template</small></div><span class="tag blue">${escapeHtml(bot.scenario?.template || 'custom')}</span></div><div class="list-row"><div><strong>Human handoff threshold</strong><small>Confidence lower than this should leave autopilot</small></div><span class="tag">${Math.round((bot.ai?.handoffConfidenceBelow || .7)*100)}%</span></div></div></section>`;
+  return `<section class="placeholder"><h2>${capitalize(state.botTab)}</h2><p>Module này sẽ dùng chung botId/workspaceId.</p></section>`;
 }
 
 function channelListRow(item) {
@@ -434,7 +546,7 @@ async function runSimulation() {
   const bot = getSelectedBot();
   const channel = document.querySelector('#sim-channel').value;
   const textValue = document.querySelector('#sim-message').value;
-  state.simulation = (await api(`/api/bots/${encodeURIComponent(bot.id)}/simulate`, { method: 'POST', body: JSON.stringify({ channel, text: textValue }) }));
+  state.simulation = await api(`/api/bots/${encodeURIComponent(bot.id)}/simulate`, { method: 'POST', body: JSON.stringify({ channel, text: textValue }) });
   renderBotDetail();
 }
 
@@ -473,10 +585,14 @@ function toast(message, error = false) {
 function capitalize(value = '') {
   return value ? value[0].toUpperCase() + value.slice(1).replaceAll('-', ' ') : '';
 }
+
 function escapeHtml(value = '') {
   return String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[char]));
 }
-function escapeAttr(value = '') { return escapeHtml(value); }
+
+function escapeAttr(value = '') {
+  return escapeHtml(value);
+}
 
 boot().catch((error) => {
   view.innerHTML = `<section class="placeholder"><h2>Bot Hub could not start</h2><p>${escapeHtml(error.message || 'Unknown error')}</p></section>`;
