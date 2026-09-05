@@ -1,6 +1,6 @@
 {
   "name": "customer-service-bot",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "main": "desktop/main.js",
@@ -12,7 +12,7 @@
     "test": "node --test",
     "check": "node scripts/check.mjs",
     "desktop": "electron .",
-    "desktop:check": "node --check desktop/main.js",
+    "desktop:check": "node --check desktop/main.js && node --check desktop/network.js",
     "desktop:build": "electron-builder --win nsis --x64"
   },
   "devDependencies": {
