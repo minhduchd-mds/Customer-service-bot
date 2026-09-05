@@ -1,6 +1,7 @@
 import { classifyIntent } from './intent.js';
 import { resolveScenario } from './scenario.js';
 import { selectSkill as selectBuiltinSkill } from '../skills/catalog.js';
+import { ConversationQueueFullError, ConversationScheduler } from './conversation-scheduler.js';
 
 function publicSkill(skill) {
   if (!skill) return null;
@@ -9,7 +10,7 @@ function publicSkill(skill) {
 }
 
 export class Router9 {
-  constructor({ idempotency, knowledge, ai, workflow, logger, skills = null, toolPolicy = null, memory = null, traces = null }) {
+  constructor({ idempotency, knowledge, ai, workflow, logger, skills = null, toolPolicy = null, memory = null, traces = null, scheduler = null }) {
     this.idempotency = idempotency;
     this.knowledge = knowledge;
     this.ai = ai;
@@ -19,6 +20,7 @@ export class Router9 {
     this.toolPolicy = toolPolicy;
     this.memory = memory;
     this.traces = traces;
+    this.scheduler = scheduler || new ConversationScheduler();
     this.metrics = {
       received: 0,
       verified: 0,
@@ -30,7 +32,68 @@ export class Router9 {
     };
   }
 
-  async handle({ connector, rawBody, payload, headers = {}, url, dispatch = true, skipVerification = false, bot = null }) {
+  async handle({ connector, rawBody, payload, headers = {}, url, dispatch = true, skipVerification = false, bot = null, _scheduled = false, _preflight = null }) {
+    if (this.scheduler && !_scheduled) {
+      const verification = skipVerification
+        ? { ok: true, reason: 'simulation' }
+        : connector.verify({ headers, rawBody, payload, url });
+
+      if (!verification.ok) {
+        return this.handle({ connector, rawBody, payload, headers, url, dispatch, skipVerification, bot, _scheduled: true, _preflight: { verification } });
+      }
+
+      const previewEvent = connector.normalize(payload);
+      const normalized = Boolean(previewEvent?.channel && previewEvent?.eventId);
+      if (!normalized) {
+        return this.handle({ connector, rawBody, payload, headers, url, dispatch, skipVerification, bot, _scheduled: true, _preflight: { verification, event: previewEvent } });
+      }
+
+      const conversationId = previewEvent.conversationId || previewEvent.chatId || previewEvent.senderId || previewEvent.eventId;
+      const queueKey = this.scheduler.key({ botId: bot?.id || 'global', channel: previewEvent.channel, conversationId });
+      try {
+        return await this.scheduler.run(queueKey, () => this.handle({
+          connector,
+          rawBody,
+          payload,
+          headers,
+          url,
+          dispatch,
+          skipVerification,
+          bot,
+          _scheduled: true,
+          _preflight: { verification, event: previewEvent }
+        }));
+      } catch (error) {
+        if (!(error instanceof ConversationQueueFullError)) throw error;
+        this.metrics.received += 1;
+        this.metrics.rejected += 1;
+        const startedAt = Date.now();
+        const trace = [
+          { stage: 1, name: 'ingress', ok: true, botId: bot?.id || null },
+          { stage: 2, name: 'authenticity', ...verification },
+          { stage: 3, name: 'normalize', ok: true, eventId: previewEvent.eventId }
+        ];
+        return this.finish({
+          accepted: false,
+          statusCode: 429,
+          reason: 'conversation_queue_full',
+          retryAfterSeconds: 1,
+          botId: bot?.id || null,
+          event: this.publicEvent(previewEvent),
+          trace
+        }, {
+          startedAt,
+          bot,
+          event: previewEvent,
+          intent: null,
+          skill: null,
+          responseSource: 'none',
+          handoff: false,
+          outbound: { delivered: false, reason: 'conversation_queue_full' }
+        });
+      }
+    }
+
     const startedAt = Date.now();
     const trace = [];
     let event = null;
@@ -46,7 +109,7 @@ export class Router9 {
     this.metrics.received += 1;
     trace.push({ stage: 1, name: 'ingress', ok: true, botId: bot?.id || null });
 
-    const verification = skipVerification ? { ok: true, reason: 'simulation' } : connector.verify({ headers, rawBody, payload, url });
+    const verification = _preflight?.verification || (skipVerification ? { ok: true, reason: 'simulation' } : connector.verify({ headers, rawBody, payload, url }));
     trace.push({ stage: 2, name: 'authenticity', ...verification });
     if (!verification.ok) {
       this.metrics.rejected += 1;
@@ -54,7 +117,7 @@ export class Router9 {
     }
     this.metrics.verified += 1;
 
-    event = connector.normalize(payload);
+    event = _preflight && Object.prototype.hasOwnProperty.call(_preflight, 'event') ? _preflight.event : connector.normalize(payload);
     const normalized = Boolean(event?.channel && event?.eventId);
     trace.push({ stage: 3, name: 'normalize', ok: normalized, eventId: event?.eventId || '' });
     if (!normalized) {
@@ -233,6 +296,7 @@ export class Router9 {
     return {
       ...this.metrics,
       idempotencyKeys: this.idempotency.size,
+      queue: this.scheduler?.snapshot?.() || null,
       memory: this.memory?.snapshot?.() || null,
       traces: this.traces?.snapshot?.() || null
     };

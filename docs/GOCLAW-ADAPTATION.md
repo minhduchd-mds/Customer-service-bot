@@ -21,12 +21,14 @@ GoClaw's repository license is Creative Commons Attribution-NonCommercial 4.0. T
 | Skill eval workflow | `/api/skills/evaluate` with trigger/expected-skill cases | Implemented |
 | Tool registry/policy | Capability-oriented `ToolPolicy` profiles with per-bot allow/deny overlay | Implemented for Bot Hub runtime capabilities |
 | Working session context | Bounded memory scoped by bot + channel + conversation + sender | Implemented in memory only |
+| Per-session serialization | Bounded `ConversationScheduler`; one active turn per conversation, independent conversations stay concurrent | Implemented in-process |
 | Tracing spans | Privacy-minimized bounded `TraceStore` recording stage metadata, selected skill, AI route and delivery result | Implemented for single-process MVP |
 | Provider fallback | Ordered OpenAI-compatible primary + fallback candidate routing with truthful provider/fallback result | Implemented via env configuration |
 | Gateway admin access boundary | Public server management gate; Basic auth when configured and loopback-only fail-safe otherwise | Implemented for single-operator VPS |
 | Multi-store PostgreSQL/SQLite architecture | Current JSON stores stay for desktop MVP; PostgreSQL/Redis migration remains planned | Deferred |
 | Hybrid vector + FTS memory | Existing repository lexical search remains; vector/FTS backend planned with PostgreSQL | Deferred |
-| Scheduler lanes / cron | n8n remains the primary workflow scheduler; per-session queue/debounce will be a separate runtime phase | Partially covered by n8n / deferred |
+| Inbound debounce | Message merging/debounce is not enabled yet; serialization prevents concurrent state races without changing message semantics | Deferred |
+| Cron | n8n remains the primary workflow scheduler | External workflow layer |
 | MCP tool bridge | No direct port; evaluate only after Bot Hub tool policy and authentication are production hardened | Deferred |
 | Agent teams/delegation | Human handoff + n8n orchestration today; multi-agent task board is future scope | Deferred |
 | Sandbox skill scripts | Custom skills in 0.4 are **instructions-only**. No imported skill can execute scripts or install dependencies | Intentionally not implemented |
@@ -57,12 +59,20 @@ Fallback restricted to allowed skills
         ↓
 Load full instructions only for selected skill
         ↓
+ConversationScheduler
+        ↓
 Router9 + ToolPolicy
         ↓
 AI / scenario / workflow / channel
         ↓
 Privacy-minimized trace
 ```
+
+## Conversation serialization
+
+A normalized conversation is keyed by bot + channel + conversation. The scheduler accepts only a bounded number of pending turns and runs one turn at a time for a key. Different keys are independent, so unrelated customers stay concurrent.
+
+This deliberately implements **serialization before debounce**. Bot Hub does not merge multiple customer messages yet because merging changes message semantics and provider acknowledgement behavior. Queue overload returns a retryable `429` result instead of growing memory without bounds. Multi-replica ordering still requires a shared queue/lock layer such as Redis.
 
 ## Public-server trust boundary
 
@@ -98,7 +108,7 @@ Customer Service Bot is a focused customer-service product, not a general-purpos
 
 1. Move bot, skill, trace, session and idempotency state to PostgreSQL/Redis for multi-replica VPS deployments.
 2. Add persistent conversation/session history with retention, deletion/export and PII controls.
-3. Add bounded inbound debounce and per-conversation serialization for bursty channel traffic.
+3. Add bounded inbound debounce only after provider acknowledgement/merge semantics are explicitly defined.
 4. Add provider health/cooldown/usage accounting around the existing ordered fallback list.
 5. Add document ingestion workers for PDF/DOCX/XLSX/PPTX with file-type-specific validation.
 6. Replace the single-operator admin gate with authenticated users/RBAC when shared enterprise administration is required.
