@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Customer Service Bot</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827;background:#f6f7f9}*{box-sizing:border-box}body{margin:0}.wrap{max-width:1180px;margin:auto;padding:48px 24px}.hero{display:flex;justify-content:space-between;gap:32px;align-items:flex-end;margin-bottom:32px}.eyebrow{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#596273}h1{font-size:clamp(36px,6vw,72px);line-height:.95;margin:10px 0 16px;letter-spacing:-.055em}.muted{color:#667085;max-width:720px;line-height:1.6}.pill{background:#111827;color:white;border-radius:999px;padding:10px 14px;font-size:13px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{grid-column:span 4;background:white;border:1px solid #e5e7eb;border-radius:22px;padding:22px;box-shadow:0 8px 30px rgba(17,24,39,.04)}.wide{grid-column:span 8}.full{grid-column:1/-1}.label{font-size:12px;color:#7b8494;text-transform:uppercase;letter-spacing:.08em}.value{font-size:28px;font-weight:750;margin:7px 0}.channels{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.channel{border:1px solid #e5e7eb;border-radius:999px;padding:8px 10px;font-size:13px}.ok{background:#ecfdf3;border-color:#abefc6}.warn{background:#fffaeb;border-color:#fedf89}pre{white-space:pre-wrap;background:#0f172a;color:#e2e8f0;border-radius:16px;padding:18px;overflow:auto;min-height:180px}.form{display:flex;gap:10px;margin-top:16px}input,select,button{border-radius:12px;border:1px solid #d0d5dd;padding:11px 13px;font:inherit}input{flex:1}button{background:#111827;color:white;cursor:pointer}@media(max-width-width:800px){.card,.wide{grid-column:1/-1}.hero{display:block}.pill{display:inline-block;margin-top:16px}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <section class="hero">
+    <div><div class="eyebrow">Omnichannel · Self-hosted · Router9</div><h1>Customer Service Bot</h1><p class="muted">Một lõi hội thoại cho Telegram, Facebook, Zalo, TikTok webhook và n8n. Adapter tách biệt, xác thực trước xử lý, knowledge base local-first.</p></div>
+    <span class="pill" id="health">checking…</span>
+  </section>
+  <section class="grid">
+    <article class="card"><div class="label">Router</div><div class="value">9 stages</div><div class="muted">Ingress → verify → normalize → dedupe → policy → skill → knowledge → response → dispatch.</div></article>
+    <article class="card"><div class="label">Runtime</div><div class="value">Node 22</div><div class="muted">Zero runtime dependencies. Built-in HTTP, crypto, test runner and fetch.</div></article>
+    <article class="card"><div class="label">Automation</div><div class="value">n8n bridge</div><div class="muted">Lead, CRM, ticket, handoff và các luồng nghiệp vụ nằm ngoài channel adapters.</div></article>
+    <article class="card wide"><div class="label">Channel readiness</div><div class="channels" id="channels"></div></article>
+    <article class="card"><div class="label">Processed</div><div class="value" id="processed">0</div><div class="muted">Messages/events processed in this process.</div></article>
+    <article class="card full"><div class="label">Router9 simulator</div><div class="form"><select id="channel"><option>telegram</option><option>facebook</option><option>zalo</option><option>tiktok</option></select><input id="message" value="Tôi muốn tư vấn giá sản phẩm"/><button id="send">Run</button></div><pre id="output">Run a simulation to inspect the full pipeline.</pre></article>
+  </section>
+</div>
+<script>
+async function refresh(){
+  const health=await fetch('/api/health').then(r=>r.json()); document.querySelector('#health').textContent=health.ok?'● healthy':'unhealthy';
+  const data=await fetch('/api/channels').then(r=>r.json()); document.querySelector('#channels').innerHTML=data.channels.map(c=>`<span class="channel ${c.inboundConfigured?'ok':'warn'}">${c.id}: ${c.inboundConfigured?'inbound ready':'configure'}</span>`).join('');
+  const metrics=await fetch('/api/metrics').then(r=>r.json()); document.querySelector('#processed').textContent=metrics.processed;
+}
+document.querySelector('#send').onclick=async()=>{const payload={channel:document.querySelector('#channel').value,text:document.querySelector('#message').value};const data=await fetch('/api/simulate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());document.querySelector('#output').textContent=JSON.stringify(data,null,2);refresh()};refresh();
+</script>
+</body>
+</html>
