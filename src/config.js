@@ -11,6 +11,14 @@ export function loadConfig(env = process.env) {
     logLevel: env.LOG_LEVEL || 'info',
     maxBodyBytes: int(env.MAX_BODY_BYTES, 1024 * 1024),
     idempotencyTtlSeconds: int(env.IDEMPOTENCY_TTL_SECONDS, 86400),
+    botStoreFile: env.BOT_STORE_FILE || './data/state/bots.json',
+    connect: {
+      ttlSeconds: int(env.CONNECT_SESSION_TTL_SECONDS, 600),
+      zaloAuthUrlTemplate: env.CONNECT_ZALO_AUTH_URL_TEMPLATE || '',
+      facebookAuthUrlTemplate: env.CONNECT_FACEBOOK_AUTH_URL_TEMPLATE || '',
+      tiktokAuthUrlTemplate: env.CONNECT_TIKTOK_AUTH_URL_TEMPLATE || '',
+      telegramHelpUrl: env.CONNECT_TELEGRAM_HELP_URL || 'https://t.me/BotFather'
+    },
     ai: {
       baseUrl: env.AI_BASE_URL || '',
       apiKey: env.AI_API_KEY || '',
