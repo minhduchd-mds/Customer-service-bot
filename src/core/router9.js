@@ -71,7 +71,19 @@ export class Router9 {
     let handoff = false;
     if (event.replyAllowed) {
       const scenario = resolveScenario(bot, intent);
-      if (scenario?.response) {
+      if (scenario?.useAi) {
+        reply = await this.ai.reply({
+          event,
+          intent,
+          skill,
+          knowledge,
+          bot,
+          botKnowledge,
+          scenarioInstruction: scenario.instruction
+        });
+        handoff = scenario.handoff;
+        responseSource = this.ai.enabled ? 'scenario-ai' : 'scenario-grounded-fallback';
+      } else if (scenario?.response) {
         reply = scenario.response;
         handoff = scenario.handoff;
         responseSource = 'scenario';
