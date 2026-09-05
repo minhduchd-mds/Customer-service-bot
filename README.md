@@ -1,21 +1,29 @@
 # Customer Service Bot — Bot Hub
 
-A self-hosted **multi-bot omnichannel customer-service platform** for Telegram, Facebook Messenger, Zalo Official Account, TikTok webhooks, Web Chat, n8n, Docker and VPS deployments.
+A self-hosted **multi-bot omnichannel customer-service platform** for Windows desktop, Docker/VPS, Telegram, Facebook Messenger, Zalo Official Account, TikTok webhooks, Web Chat and n8n.
 
 The operator flow is intentionally simple:
 
 > **Create → Connect → Teach → Go Live**
 
-Behind that flow, each bot keeps its own identity, intelligence mode, channels, knowledge and scenarios while `Router9` runs inbound events through authenticity, normalization, idempotency, policy, intent/skill, knowledge, response and workflow/dispatch stages.
+Behind that flow, each bot keeps its own identity, intelligence mode, channels, Product/Business Knowledge and scenarios while `Router9` runs inbound events through authenticity, normalization, idempotency, policy, intent/skill, knowledge, response and workflow/dispatch stages.
 
 ## Current product surface
 
 - Create many bots in one workspace.
 - Bot modes: **AI Autopilot**, **Scenario**, and **Hybrid**.
-- Per-bot teaching sources and reusable scenario templates.
+- Product setup directly in the onboarding wizard.
+- Reusable scenarios: Sales Assistant, **Product Introduction**, **Product Advisor**, Customer Support and Order Tracking.
+- Product intents: introduction, recommendation, comparison, pricing and promotion.
+- AI-assisted product scenarios grounded in bot-specific Product Knowledge.
+- Grounded product fallback when no AI provider is configured.
 - QR connection handoff for Zalo/Facebook/TikTok/Telegram setup.
 - Self-hosted QR generation; no third-party QR image service.
-- QR URLs are short-lived and contain no provider token.
+- Windows desktop QR uses a reachable LAN address rather than `127.0.0.1` when possible.
+- Desktop management UI/API remain loopback-only; the LAN listener exposes only `/connect/*`.
+- **Settings → Deployment** for Desktop/LAN vs Docker/VPS setup draft.
+- VPS bootstrap helper that generates deployment secrets without printing them.
+- Docker Compose automatically sets `PUBLIC_BASE_URL=https://${BOT_DOMAIN}`.
 - Web Chat can be attached instantly in the MVP.
 - Bot-aware webhook routes: `/webhooks/:botId/:channel`.
 - Bot-aware Router9 simulator.
@@ -32,6 +40,22 @@ Behind that flow, each bot keeps its own identity, intelligence mode, channels, 
 
 > Production capability still depends on provider approval and credentials. The QR flow is an authorization **handoff**, not a personal-account session scraper. Zalo/TikTok/Facebook are not marked fully connected until their official provider-specific authorization/token-exchange adapter succeeds.
 
+## Windows desktop
+
+The Electron desktop build embeds the Bot Hub backend. It does not require the operator to start Node manually.
+
+Runtime behavior:
+
+```text
+Windows app
+  ├─ Management UI/API -> 127.0.0.1 only
+  ├─ Bot state -> Windows AppData
+  ├─ Platform deployment draft -> Windows AppData
+  └─ QR handoff -> physical Wi-Fi/Ethernet LAN IP, /connect/* only
+```
+
+For real public provider webhooks/OAuth callbacks, use the VPS deployment below.
+
 ## Quick start
 
 ```bash
@@ -45,13 +69,58 @@ Open `http://localhost:8787`.
 
 ## Docker / VPS
 
+Fast bootstrap:
+
 ```bash
-cp .env.example .env
-# Replace BOT_DOMAIN, N8N_DOMAIN, POSTGRES_PASSWORD and N8N_ENCRYPTION_KEY.
+sh scripts/vps-bootstrap.sh bot.example.com n8n.example.com
+# Fill approved provider credentials / OAuth templates in .env.
 docker compose up -d --build
 ```
 
-Set `PUBLIC_BASE_URL` to the public HTTPS Bot Hub origin before using QR connection links.
+Then verify:
+
+```bash
+docker compose ps
+curl -fsS https://bot.example.com/api/health
+```
+
+The Compose stack sets the active public Bot Hub origin from `BOT_DOMAIN`, so production QR/OAuth callbacks do not fall back to localhost.
+
+See [`docs/VPS-DEPLOY.md`](docs/VPS-DEPLOY.md).
+
+## Product setup
+
+Create a Sales/Product bot and choose **Product Introduction** or **Product Advisor**.
+
+The Teach step can capture:
+
+- product name;
+- current verified price;
+- short introduction;
+- highlights / practical benefits;
+- CTA;
+- additional policy, warranty, delivery or FAQ data.
+
+Product scenario flow:
+
+```text
+Customer request
+  ↓
+Product intent
+  ↓
+Scenario boundary
+  ↓
+Bot-specific Product Knowledge
+  ↓
+AI-assisted grounded answer
+  or safe local fallback
+  ↓
+CTA / lead / human handoff
+```
+
+The system must not invent product specifications, price, promotion, stock, warranty or delivery promises.
+
+See [`docs/PRODUCT-SCENARIOS.md`](docs/PRODUCT-SCENARIOS.md).
 
 ## Bot Hub API
 
@@ -64,6 +133,7 @@ Set `PUBLIC_BASE_URL` to the public HTTPS Bot Hub origin before using QR connect
 | POST | `/api/bots/:botId/go-live` | Enable bot after minimum setup |
 | POST | `/api/bots/:botId/simulate` | Run Router9 for one bot without outbound send |
 | GET | `/api/scenario-templates` | Reusable scenario gallery |
+| GET/PATCH | `/api/deployment` | Read/save non-secret deployment draft and generate VPS env/commands |
 | POST | `/api/connect/sessions` | Create QR/instant channel setup session |
 | GET | `/api/connect/sessions/:token` | Read temporary connection state |
 | GET | `/connect/:token` | Mobile QR handoff page |
@@ -89,14 +159,25 @@ The importer shallow-clones into `data/repos/<name>`, removes `.git`, common bui
 - QR connection sessions expire automatically.
 - QR payload contains only a temporary Bot Hub URL, not access tokens.
 - No personal social-account QR-login cookie/session capture.
-- Caddy terminates HTTPS on VPS.
-- `data/state/bots.json` contains product configuration only; do not persist provider secrets there.
+- Desktop LAN listener exposes only the connection handoff surface.
+- VPS Caddy terminates HTTPS; database and Redis stay on the internal network.
+- Deployment settings intentionally omit SSH passwords/private keys/provider secrets.
+- Product answers must be grounded in current business knowledge.
 
-Before multi-replica production, move bot state/idempotency to PostgreSQL/Redis and implement an encrypted provider credential vault.
+Before multi-replica production, move bot state/idempotency to PostgreSQL/Redis, add admin authentication/RBAC, and implement an encrypted provider credential vault.
 
 ## Claude Code workflow
 
-Start with [`CLAUDE.md`](CLAUDE.md). Relevant skills include channel connectors, webhook security, n8n workflows, repository knowledge, quality gates and the new **Bot Hub Product Skill** for the multi-bot onboarding/UI contract.
+Start with [`CLAUDE.md`](CLAUDE.md). Relevant project skills include:
+
+- Bot Hub Product;
+- Product Scenario;
+- Deployment / VPS;
+- channel connectors;
+- webhook security;
+- n8n workflows;
+- repository knowledge;
+- quality gates.
 
 No third-party prompt/template is copied verbatim. External references and license notes live in [`docs/SOURCES-LICENSES.md`](docs/SOURCES-LICENSES.md).
 
@@ -104,6 +185,7 @@ No third-party prompt/template is copied verbatim. External references and licen
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/CHANNELS.md`](docs/CHANNELS.md)
+- [`docs/PRODUCT-SCENARIOS.md`](docs/PRODUCT-SCENARIOS.md)
 - [`docs/N8N.md`](docs/N8N.md)
 - [`docs/VPS-DEPLOY.md`](docs/VPS-DEPLOY.md)
 - [`docs/SECURITY.md`](docs/SECURITY.md)
