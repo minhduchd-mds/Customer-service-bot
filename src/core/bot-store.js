@@ -131,8 +131,10 @@ export class BotStore {
       rules: Array.isArray(scenario.rules) ? scenario.rules.slice(0, 40).map((rule) => ({
         intent: String(rule.intent || 'general').slice(0, 40),
         response: String(rule.response || '').slice(0, 1200),
-        handoff: Boolean(rule.handoff)
-      })).filter((rule) => rule.response || rule.handoff) : [],
+        handoff: Boolean(rule.handoff),
+        useAi: Boolean(rule.useAi),
+        instruction: String(rule.instruction || '').slice(0, 1400)
+      })).filter((rule) => rule.response || rule.handoff || rule.useAi) : [],
       notes: String(scenario.notes || '').slice(0, 4000)
     };
     bot.updatedAt = new Date().toISOString();
