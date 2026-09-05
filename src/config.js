@@ -12,6 +12,7 @@ export function loadConfig(env = process.env) {
     maxBodyBytes: int(env.MAX_BODY_BYTES, 1024 * 1024),
     idempotencyTtlSeconds: int(env.IDEMPOTENCY_TTL_SECONDS, 86400),
     botStoreFile: env.BOT_STORE_FILE || './data/state/bots.json',
+    platformSettingsFile: env.PLATFORM_SETTINGS_FILE || './data/state/platform-settings.json',
     connect: {
       ttlSeconds: int(env.CONNECT_SESSION_TTL_SECONDS, 600),
       zaloAuthUrlTemplate: env.CONNECT_ZALO_AUTH_URL_TEMPLATE || '',
