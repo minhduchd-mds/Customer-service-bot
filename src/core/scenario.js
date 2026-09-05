@@ -4,9 +4,9 @@ const TEMPLATES = {
     category: 'Sales',
     description: 'Tư vấn nhu cầu, báo giá, chốt lead và chuyển sale khi cần.',
     rules: [
-      { intent: 'pricing', response: 'Anh/chị cho mình tên sản phẩm hoặc gói dịch vụ cần báo giá. Mình sẽ chỉ sử dụng bảng giá đã có trong dữ liệu doanh nghiệp.' },
+      { intent: 'pricing', useAi: true, instruction: 'Answer pricing only from bot/product knowledge. If current price is missing, say it is not available in business data. Never invent a price.' },
       { intent: 'sales', response: 'Mình có thể hỗ trợ chọn sản phẩm phù hợp. Anh/chị cho mình biết nhu cầu, số lượng và khu vực nhận hàng nhé.' },
-      { intent: 'promotion', response: 'Mình sẽ kiểm tra chương trình ưu đãi đang có trong dữ liệu doanh nghiệp. Nếu chưa có dữ liệu khuyến mại hiện hành, mình sẽ không tự tạo ưu đãi.' },
+      { intent: 'promotion', useAi: true, instruction: 'Answer promotion questions only from current business knowledge. Never invent discounts, vouchers or expiry dates.' },
       { intent: 'handoff', response: 'Mình đã ghi nhận yêu cầu gặp tư vấn viên và sẽ chuyển toàn bộ nội dung hiện tại sang nhân viên phụ trách.', handoff: true }
     ]
   },
@@ -15,9 +15,13 @@ const TEMPLATES = {
     category: 'Product',
     description: 'Giới thiệu sản phẩm theo cấu trúc: giá trị → tính năng → lợi ích → đối tượng phù hợp → CTA.',
     rules: [
-      { intent: 'product-intro', response: 'Mình sẽ giới thiệu sản phẩm dựa trên dữ liệu đã được doanh nghiệp cung cấp: sản phẩm giải quyết nhu cầu gì, điểm nổi bật, lợi ích thực tế, đối tượng phù hợp và bước tiếp theo. Anh/chị cho mình tên sản phẩm muốn xem nhé.' },
-      { intent: 'pricing', response: 'Mình sẽ lấy giá từ Product Knowledge hoặc bảng giá đã nạp. Nếu dữ liệu chưa có giá hiện hành, mình sẽ báo chưa đủ thông tin thay vì tự suy đoán.' },
-      { intent: 'promotion', response: 'Mình sẽ kiểm tra ưu đãi gắn với đúng sản phẩm trong dữ liệu hiện hành. Ưu đãi hết hạn hoặc không có nguồn xác nhận sẽ không được sử dụng.' },
+      {
+        intent: 'product-intro',
+        useAi: true,
+        instruction: 'Introduce the requested product using only bot/product knowledge. Structure the answer naturally: what it is, customer problem/value, highlights, practical benefits, who it fits, verified price if present, then a concise CTA. Do not invent specifications, stock, warranty, price or promotions.'
+      },
+      { intent: 'pricing', useAi: true, instruction: 'Return the current product price only when it appears in bot/product knowledge. If it is missing, explicitly say the business data has no confirmed current price.' },
+      { intent: 'promotion', useAi: true, instruction: 'Describe only verified promotions found in bot/product knowledge. If none are present, say there is no confirmed promotion in the current data.' },
       { intent: 'sales', response: 'Nếu anh/chị thấy sản phẩm phù hợp, mình có thể ghi nhận nhu cầu, số lượng, khu vực và thông tin liên hệ để chuyển cho tư vấn viên.' },
       { intent: 'handoff', response: 'Mình sẽ chuyển cuộc trao đổi cùng sản phẩm đang quan tâm sang tư vấn viên để hỗ trợ tiếp.', handoff: true }
     ]
@@ -27,10 +31,10 @@ const TEMPLATES = {
     category: 'Product',
     description: 'Tư vấn chọn và so sánh sản phẩm theo nhu cầu, ngân sách và tiêu chí khách hàng.',
     rules: [
-      { intent: 'product-recommendation', response: 'Để gợi ý đúng sản phẩm, anh/chị cho mình 3 thông tin: nhu cầu chính, khoảng ngân sách và tiêu chí ưu tiên. Mình sẽ đối chiếu với Product Knowledge đã nạp.' },
-      { intent: 'product-compare', response: 'Anh/chị gửi giúp mình 2 sản phẩm cần so sánh. Mình sẽ so theo các tiêu chí có dữ liệu như tính năng, lợi ích, giá, bảo hành và đối tượng phù hợp; mục nào thiếu dữ liệu sẽ được ghi rõ.' },
-      { intent: 'product-intro', response: 'Mình có thể giới thiệu nhanh sản phẩm theo nhu cầu sử dụng thay vì đọc danh sách tính năng. Anh/chị cho mình tên sản phẩm hoặc mục đích sử dụng nhé.' },
-      { intent: 'pricing', response: 'Mình chỉ dùng mức giá đã có trong dữ liệu doanh nghiệp. Nếu anh/chị cho mình sản phẩm cụ thể, mình sẽ kiểm tra đúng phiên bản và mức giá tương ứng.' },
+      { intent: 'product-recommendation', useAi: true, instruction: 'Recommend products only from bot/product knowledge. Ask for missing need, budget or priority when necessary. Explain why each recommendation matches the customer need.' },
+      { intent: 'product-compare', useAi: true, instruction: 'Compare only products and attributes found in bot/product knowledge. Use clear criteria such as use case, highlights, benefits, price, warranty or other verified fields. Mark missing data instead of guessing.' },
+      { intent: 'product-intro', useAi: true, instruction: 'Introduce the product from bot/product knowledge and relate the benefits to the customer need. Avoid a raw specification dump.' },
+      { intent: 'pricing', useAi: true, instruction: 'Use only confirmed price data from bot/product knowledge and identify the exact product/variant when possible.' },
       { intent: 'sales', response: 'Nếu đã chọn được sản phẩm, mình có thể chuyển sang bước lấy số lượng, khu vực và thông tin liên hệ để tạo lead.' },
       { intent: 'handoff', response: 'Mình sẽ chuyển nhu cầu và tiêu chí lựa chọn hiện tại sang tư vấn viên để tiếp tục tư vấn.', handoff: true }
     ]
@@ -76,5 +80,10 @@ export function resolveScenario(bot, intent) {
   const rules = Array.isArray(bot.scenario?.rules) ? bot.scenario.rules : [];
   const rule = rules.find((item) => item.intent === intent) || rules.find((item) => item.intent === 'general');
   if (!rule) return null;
-  return { response: rule.response || '', handoff: Boolean(rule.handoff) };
+  return {
+    response: rule.response || '',
+    handoff: Boolean(rule.handoff),
+    useAi: Boolean(rule.useAi),
+    instruction: String(rule.instruction || '')
+  };
 }
