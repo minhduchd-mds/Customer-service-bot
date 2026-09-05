@@ -1,0 +1,57 @@
+name: windows-desktop
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install desktop build dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Quality gate
+        run: |
+          npm run check
+          npm run desktop:check
+          npm test
+
+      - name: Build Windows installer
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run desktop:build
+
+      - name: Create SHA-256 checksum
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path dist-desktop -Filter *.exe
+          if ($files.Count -eq 0) { throw 'No Windows installer was produced.' }
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($file.Name)"
+          }
+          $lines | Set-Content -Path dist-desktop/SHA256SUMS.txt -Encoding ascii
+          Get-Content dist-desktop/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: customer-service-bot-windows-x64
+          path: |
+            dist-desktop/*.exe
+            dist-desktop/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
