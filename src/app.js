@@ -12,6 +12,7 @@ import { WorkflowBridge } from './core/workflow.js';
 import { Router9 } from './core/router9.js';
 import { BotStore } from './core/bot-store.js';
 import { ConnectSessionStore } from './core/connect-session.js';
+import { PlatformSettingsStore, deploymentEnv, deploymentSummary } from './core/platform-settings.js';
 import { listScenarioTemplates, scenarioFromTemplate } from './core/scenario.js';
 import { TelegramConnector } from './connectors/telegram.js';
 import { FacebookConnector } from './connectors/facebook.js';
@@ -42,6 +43,7 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
     logger
   });
   const bots = new BotStore({ file: config.botStoreFile, logger });
+  const platformSettings = new PlatformSettingsStore({ file: config.platformSettingsFile, logger });
   const connectSessions = new ConnectSessionStore({ ttlSeconds: config.connect.ttlSeconds, publicBaseUrl: config.publicBaseUrl });
   const startedAt = Date.now();
 
@@ -80,6 +82,23 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
       if (request.method === 'GET' && url.pathname === '/api/metrics') return json(response, 200, router.snapshotMetrics());
       if (request.method === 'GET' && url.pathname === '/api/skills') return json(response, 200, { skills: listSkills() });
       if (request.method === 'GET' && url.pathname === '/api/scenario-templates') return json(response, 200, { templates: listScenarioTemplates() });
+
+      if (request.method === 'GET' && url.pathname === '/api/deployment') {
+        const profile = await platformSettings.get();
+        return json(response, 200, deploymentPayload(profile, config.publicBaseUrl));
+      }
+
+      if (request.method === 'PATCH' && url.pathname === '/api/deployment') {
+        const payload = await requestJson(request, config.maxBodyBytes);
+        let profile;
+        try {
+          profile = await platformSettings.update(payload);
+        } catch (error) {
+          if (error?.message === 'invalid_public_url') throw new HttpError(400, 'Public URL must be a valid HTTP/HTTPS URL without credentials', 'invalid_public_url');
+          throw error;
+        }
+        return json(response, 200, deploymentPayload(profile, config.publicBaseUrl));
+      }
 
       if (request.method === 'GET' && url.pathname === '/api/bots') {
         return json(response, 200, { bots: await bots.list() });
@@ -239,7 +258,25 @@ export function createApp({ config = loadConfig(), logger = createLogger(config.
     }
   };
 
-  return { handler, config, connectors, router, bots, connectSessions };
+  return { handler, config, connectors, router, bots, connectSessions, platformSettings };
+}
+
+function deploymentPayload(profile, runtimePublicBaseUrl) {
+  const deployment = deploymentSummary(profile, runtimePublicBaseUrl);
+  return {
+    deployment,
+    dockerEnv: deploymentEnv(profile),
+    commands: {
+      prepare: 'bash scripts/vps-bootstrap.sh <bot-domain> <n8n-domain>',
+      start: 'docker compose up -d --build',
+      status: 'docker compose ps',
+      logs: 'docker compose logs -f bot',
+      health: deployment.effectivePublicBaseUrl ? `${deployment.effectivePublicBaseUrl}/api/health` : 'https://<BOT_DOMAIN>/api/health'
+    },
+    note: deployment.publicReady
+      ? 'PUBLIC_BASE_URL is active in this runtime. New QR/OAuth callbacks can use the public HTTPS endpoint.'
+      : 'Saved deployment values are a deployment draft. Apply them to the VPS .env and restart the server before treating the public URL as active.'
+  };
 }
 
 async function requestJson(request, maxBodyBytes) {
@@ -270,7 +307,9 @@ function providerAuthorizeUrl(config, session) {
   };
   const template = templates[session.channel];
   if (!template) return null;
-  const callback = `${config.publicBaseUrl.replace(/\/$/, '')}/connect/callback/${session.channel}`;
+  const callbackBase = config.publicBaseUrl.replace(/\/$/, '');
+  if (!callbackBase) return null;
+  const callback = `${callbackBase}/connect/callback/${session.channel}`;
   return template
     .replaceAll('{state}', encodeURIComponent(session.token))
     .replaceAll('{redirectUri}', encodeURIComponent(callback));
@@ -281,7 +320,7 @@ function connectionPage({ session, bot, providerUrl }) {
   const botName = escapeHtml(bot?.name || 'Bot');
   const action = providerUrl
     ? `<a class="primary" href="${escapeHtml(providerUrl)}" rel="noreferrer">Continue with ${channel}</a>`
-    : `<div class="notice">The official authorization URL for ${channel} is not configured yet. Add the provider's approved OAuth URL template on the server, then scan again.</div>`;
+    : `<div class="notice">The official authorization URL for ${channel} is not active on this runtime yet. For production OAuth, deploy Bot Hub on a public HTTPS VPS and configure PUBLIC_BASE_URL plus the provider authorization template.</div>`;
   return mobileShell(`
     <div class="mark">⌁</div>
     <p class="eyebrow">Bot Hub connection</p>
