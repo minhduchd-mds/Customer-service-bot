@@ -1,0 +1,15 @@
+{
+  "name": "customer-service-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Omnichannel customer-service bot foundation for Telegram, Facebook Messenger, Zalo OA and approved TikTok integrations.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
+    "check": "node scripts/check.mjs"
+  },
+  "license": "MIT"
+}
