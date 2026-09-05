@@ -73,3 +73,16 @@ test('conversation management API lists, reads, resolves and deletes durable rec
     assert.equal(deleted.payload.deleted, true);
   });
 });
+
+test('conversation runtime serves the durable inbox assets on the protected management surface', async () => {
+  await withRuntime(async ({ base }) => {
+    const script = await fetch(`${base}/inbox.js`);
+    assert.equal(script.status, 200);
+    assert.match(script.headers.get('content-type') || '', /javascript/);
+    assert.match(await script.text(), /Loading durable conversations/);
+
+    const stylesheet = await fetch(`${base}/inbox.css`);
+    assert.equal(stylesheet.status, 200);
+    assert.match(stylesheet.headers.get('content-type') || '', /text\/css/);
+  });
+});

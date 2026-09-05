@@ -1,5 +1,14 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { ConversationLedger } from './conversation-ledger.js';
 import { HttpError, json, parseJson, readRawBody } from '../lib/http.js';
+
+const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../public');
+const inboxAssets = new Map([
+  ['/inbox.js', ['inbox.js', 'text/javascript; charset=utf-8']],
+  ['/inbox.css', ['inbox.css', 'text/css; charset=utf-8']]
+]);
 
 export function attachConversationPersistence(runtime) {
   if (!runtime?.router || !runtime?.config || typeof runtime?.handler !== 'function') throw new Error('invalid_runtime');
@@ -38,6 +47,11 @@ export function conversationManagementHandler({ nextHandler, ledger, config, log
   return async (request, response) => {
     const url = new URL(request.url || '/', config.publicBaseUrl || `http://${request.headers.host || 'localhost'}`);
     try {
+      if (request.method === 'GET' && inboxAssets.has(url.pathname)) {
+        const [file, contentType] = inboxAssets.get(url.pathname);
+        return sendAsset(response, await readFile(path.join(publicDir, file), 'utf8'), contentType);
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/conversations') {
         return json(response, 200, {
           conversations: ledger.listConversations({
@@ -106,4 +120,13 @@ export function conversationManagementHandler({ nextHandler, ledger, config, log
 
 async function requestJson(request, maxBodyBytes) {
   return parseJson(await readRawBody(request, maxBodyBytes));
+}
+
+function sendAsset(response, body, contentType) {
+  response.writeHead(200, {
+    'content-type': contentType,
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store'
+  });
+  response.end(body);
 }
