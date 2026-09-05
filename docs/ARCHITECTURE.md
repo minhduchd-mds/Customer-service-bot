@@ -1,29 +1,83 @@
 # Architecture
 
-## Goal
+## Product goal
 
-One customer-service core, many channels. Every channel translates its platform payload into the same normalized event and keeps platform-specific auth/outbound details out of business logic.
+Bot Hub is one self-hosted customer-service platform that can operate many bots. Operators see the simple flow **Create → Connect → Teach → Go Live** while channel security, Router9, AI, workflows and observability remain behind the product surface.
 
 ```text
-Telegram ─┐
-Facebook ─┼─> Channel Adapter ─> Router9 ─> Runtime Skill ─> Knowledge ─> AI/Fallback ─> Channel
-Zalo ─────┤                         │                           │
-TikTok ───┘                         └─────────────> n8n ───────┘
-
-Local repository imports ───────────────> KnowledgeIndex
+Workspace
+   │
+   ├── Bot A ── Channels[] ─┐
+   ├── Bot B ── Channels[] ─┼─> Channel Adapter ─> Router9 ─> Scenario / AI ─> Channel
+   └── Bot N ── Channels[] ─┘                         │            │
+                                                    Knowledge     n8n
 ```
+
+Every bot owns its identity, intelligence mode, channels, teaching sources and scenario configuration. `botId` is included in bot-aware webhook routing, idempotency keys, workflow events and logs.
+
+## Bot model
+
+The MVP persists product state to `data/state/bots.json` through `BotStore` so the product works without another runtime dependency. The model contains:
+
+```text
+workspaceId
+botId
+name / purpose / status
+intelligenceMode: ai | scenario | hybrid
+channels[]
+knowledgeSources[]
+scenario { template, rules, notes }
+ai profile
+```
+
+Provider access tokens must **not** be persisted in this file. Production channel credentials belong in an encrypted credential vault.
+
+## Connect / QR architecture
+
+QR is a temporary authorization handoff, not a provider session-login mechanism.
+
+```text
+Desktop Bot Hub
+    │
+    ├─ POST /api/connect/sessions
+    │
+    ├─ random short-lived token
+    │
+    └─ self-hosted QR containing only:
+          https://bot.example.com/connect/<token>
+                         │
+                    phone scans
+                         │
+                Bot Hub handoff page
+                         │
+              approved provider OAuth
+                         │
+               server token exchange
+                         │
+                   channel connected
+```
+
+`ConnectSessionStore` is in-memory and expires tokens automatically. The QR encoder is implemented locally (`src/lib/qr.js`) and does not call an external QR rendering service.
+
+If an official provider authorization URL is not configured, the handoff page stops and explains that setup is incomplete. It never pretends a channel is connected.
 
 ## Router9
 
-1. **Ingress** — raw request enters the platform.
-2. **Authenticity** — verify channel secret/signature against raw bytes before parsing-dependent work.
-3. **Normalize** — channel payload becomes one event model.
-4. **Idempotency** — reject repeat deliveries by `channel:eventId`.
+1. **Ingress** — raw request enters the platform with optional bot context.
+2. **Authenticity** — verify channel secret/signature before business processing.
+3. **Normalize** — channel payload becomes one normalized event.
+4. **Idempotency** — reject repeat deliveries by `botId:channel:eventId` when a bot exists.
 5. **Policy** — decide respond, ignore or workflow-only.
-6. **Intent + skill** — classify intent and pick a runtime customer-service capability.
-7. **Knowledge** — local source/doc search; no source means the model must not invent business facts.
-8. **Response** — AI router when configured; deterministic safe fallback otherwise.
-9. **Workflow + dispatch + observe** — emit to n8n, send only if the event is replyable, update metrics/logs.
+6. **Intent + skill** — classify intent and choose a runtime service skill.
+7. **Knowledge** — repository search plus bot-specific teaching sources.
+8. **Response** — Scenario / AI / Hybrid selection.
+9. **Workflow + dispatch + observe** — emit bot-aware workflow data, send reply when allowed, update metrics/logs.
+
+### Intelligence modes
+
+- **AI** — use the AI router (or deterministic fallback if no provider is configured).
+- **Scenario** — only deterministic scenario rules; unmatched intents hand off safely.
+- **Hybrid** — use a scenario rule first; otherwise fall through to AI/fallback.
 
 ## Normalized event
 
@@ -46,16 +100,35 @@ Local repository imports ───────────────> Knowledg
 
 ## Repository-as-knowledge design
 
-`./scripts/import-repo.sh` performs a shallow local clone into `data/repos/<name>` and strips `.git`, common build directories and key/certificate files. `KnowledgeIndex` scans supported text/code files with size/count limits. The first implementation is lexical so it works offline and is auditable; a future vector adapter can be added behind the same `search(query)` contract.
+`bash scripts/import-repo.sh <url>` performs a shallow local clone into `data/repos/<name>` and strips `.git`, common build directories and key/certificate files. `KnowledgeIndex` scans supported text/code files with size/count limits. The first implementation is lexical, offline-capable and auditable; a future vector adapter can sit behind the same `search(query)` contract.
 
-This is deliberately different from copying an upstream bot project into the product. We reuse **ideas and public API contracts**, while keeping the product implementation self-written and license-clean.
+Bot-specific text/URL/document/repository metadata is kept separately from the global repository index and is supplied to the selected bot's response context.
+
+## Frontend information architecture
+
+Normal operators see:
+
+```text
+Home
+Bots
+Conversations
+Customers
+Automations
+Analytics
+Settings
+```
+
+Router9, provider model routing, raw webhook secrets and n8n internals are not first-level navigation. Advanced technical controls should use progressive disclosure inside bot/settings surfaces.
 
 ## Scaling path
 
-The in-memory idempotency store is adequate for a single-process MVP. Before multi-replica production rollout:
+Current MVP state is appropriate for a single Bot Hub process. Before multi-replica or multi-business production rollout:
 
-- move idempotency to Redis with TTL + SET NX;
-- persist normalized conversations, contacts, tickets and audit events in PostgreSQL;
+- move `BotStore` from JSON to PostgreSQL;
+- move idempotency and connect sessions to Redis with TTL / SET NX semantics;
+- add encrypted per-bot provider credential storage;
+- persist conversations, messages, contacts, tickets and audit logs in PostgreSQL;
 - put outbound work on a durable queue;
-- retain the same connector and Router9 interfaces;
-- add tenant isolation before serving multiple businesses.
+- enforce workspace/tenant authorization on every bot-aware route;
+- add provider-specific OAuth token-exchange adapters and refresh-token rotation;
+- add OpenTelemetry metrics/traces and load tests.
