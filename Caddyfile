@@ -1,0 +1,19 @@
+{$BOT_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy bot:8787
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy no-referrer
+  }
+}
+
+{$N8N_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy n8n:5678
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options nosniff
+  }
+}

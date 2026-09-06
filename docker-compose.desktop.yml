@@ -1,0 +1,70 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      BOT_STORE_FILE: /app/data/state/bots.json
+      PLATFORM_SETTINGS_FILE: /app/data/state/platform-settings.json
+      SKILL_STORE_FILE: /app/data/state/skills.json
+      CONVERSATION_DB_FILE: /app/data/state/conversations.sqlite
+      CONVERSATION_RETENTION_DAYS: ${CONVERSATION_RETENTION_DAYS:-30}
+      KNOWLEDGE_ROOT: /app/data/repos
+      BOT_HUB_ADMIN_USER: ${BOT_HUB_ADMIN_USER:-admin}
+      BOT_HUB_ADMIN_TOKEN: ${BOT_HUB_ADMIN_TOKEN:-}
+      WEB_CONSOLE_ORIGINS: ${WEB_CONSOLE_ORIGINS:-https://customer-service-bot-zeta.vercel.app,https://customer-service-bot-duc-s-projects.vercel.app}
+    ports:
+      - "8787:8787"
+    volumes:
+      - bot_state:/app/data/state
+      - ./data/repos:/app/data/repos:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-dev-only-change-me}
+      POSTGRES_DB: n8n
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-local-dev-only-change-me}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-local-dev-only-change-me}
+      GENERIC_TIMEZONE: Asia/Bangkok
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  bot_state:
+  postgres_data:
+  redis_data:
+  n8n_data:

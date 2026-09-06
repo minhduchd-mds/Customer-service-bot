@@ -1,0 +1,53 @@
+{
+  "name": "customer-service-bot",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.js",
+  "description": "Multi-bot omnichannel customer-service Bot Hub with durable conversations, safe dynamic skills, runtime governance, Windows desktop, Docker/VPS and approved channel integrations.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
+    "check": "node scripts/check.mjs",
+    "desktop": "electron .",
+    "desktop:check": "node --check desktop/main.js && node --check desktop/network.js",
+    "desktop:build": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "44.2.0",
+    "electron-builder": "26.15.7"
+  },
+  "build": {
+    "appId": "com.minhduchd.customerservicebot",
+    "productName": "Customer Service Bot",
+    "asar": true,
+    "files": [
+      "desktop/**/*",
+      "src/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Customer Service Bot"
+    },
+    "artifactName": "Customer-Service-Bot-Setup-${version}-${arch}.${ext}"
+  },
+  "license": "MIT"
+}

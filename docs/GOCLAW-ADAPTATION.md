@@ -1,0 +1,115 @@
+# GoClaw architecture study and clean-room adaptation
+
+This document records concepts studied from `nextlevelbuilder/goclaw` and how they are independently implemented or intentionally deferred in Customer Service Bot.
+
+Reference reviewed: GoClaw `dev` at commit `169e0bafafda983b53ebdb9f884d7bf5e0204249`.
+
+## License boundary
+
+GoClaw's repository license is Creative Commons Attribution-NonCommercial 4.0. This project does **not** copy GoClaw source files, bundled `SKILL.md` prose, regex sets, prompts, UI code, or executable implementations. The items below are architectural concepts independently reimplemented for this repository's Node.js architecture.
+
+## Mapping
+
+| GoClaw concept studied | Customer Service Bot 0.4 adaptation | Status |
+| --- | --- | --- |
+| Versioned skill store | `SkillRegistry` with SHA-256 content hash and monotonically increasing custom-skill version | Implemented |
+| Builtin + managed skill hierarchy | Built-in runtime skills plus custom persisted instruction skills; built-ins cannot be overwritten | Implemented, deliberately simpler |
+| Skill metadata search | Zero-dependency BM25-style metadata/trigger search | Implemented |
+| Per-agent skill grants | Per-bot `skills.mode=auto/allowlist` and slug grants | Implemented |
+| Progressive skill disclosure | List/search returns metadata by default; full instructions returned only by skill detail/selection | Implemented |
+| Skill publishing safety checks | Independent line-oriented high-risk + prompt-override scanner | Implemented |
+| Skill eval workflow | `/api/skills/evaluate` with trigger/expected-skill cases | Implemented |
+| Tool registry/policy | Capability-oriented `ToolPolicy` profiles with per-bot allow/deny overlay | Implemented for Bot Hub runtime capabilities |
+| Working session context | Bounded memory scoped by bot + channel + conversation + sender | Implemented in memory only |
+| Per-session serialization | Bounded `ConversationScheduler`; one active turn per conversation, independent conversations stay concurrent | Implemented in-process |
+| Tracing spans | Privacy-minimized bounded `TraceStore` recording stage metadata, selected skill, AI route and delivery result | Implemented for single-process MVP |
+| Provider fallback | Ordered OpenAI-compatible primary + fallback candidate routing with truthful provider/fallback result | Implemented via env configuration |
+| Gateway admin access boundary | Public server management gate; Basic auth when configured and loopback-only fail-safe otherwise | Implemented for single-operator VPS |
+| Multi-store PostgreSQL/SQLite architecture | Current JSON stores stay for desktop MVP; PostgreSQL/Redis migration remains planned | Deferred |
+| Hybrid vector + FTS memory | Existing repository lexical search remains; vector/FTS backend planned with PostgreSQL | Deferred |
+| Inbound debounce | Message merging/debounce is not enabled yet; serialization prevents concurrent state races without changing message semantics | Deferred |
+| Cron | n8n remains the primary workflow scheduler | External workflow layer |
+| MCP tool bridge | No direct port; evaluate only after Bot Hub tool policy and authentication are production hardened | Deferred |
+| Agent teams/delegation | Human handoff + n8n orchestration today; multi-agent task board is future scope | Deferred |
+| Sandbox skill scripts | Custom skills in 0.4 are **instructions-only**. No imported skill can execute scripts or install dependencies | Intentionally not implemented |
+| Office bundled skills | PDF/DOCX/XLSX/PPTX patterns inform future document knowledge ingestion; original GoClaw skill text/scripts are not included | Roadmap |
+| Workspace discipline | Bot-specific state/knowledge boundaries and original Claude Code workspace skill | Applied as development guidance |
+| Cross-surface parity | Any backend capability must be considered for API, desktop, Docker/VPS and tests | Applied as development rule |
+
+## Runtime skill lifecycle in Bot Hub
+
+```text
+Publish custom instructions
+        ↓
+Validate metadata / slug / size
+        ↓
+Safety + prompt-override scan
+        ↓
+SHA-256 content hash
+        ↓
+Create or version skill
+        ↓
+Enable / disable
+        ↓
+Optional per-bot allowlist
+        ↓
+Intent match or metadata search
+        ↓
+Fallback restricted to allowed skills
+        ↓
+Load full instructions only for selected skill
+        ↓
+ConversationScheduler
+        ↓
+Router9 + ToolPolicy
+        ↓
+AI / scenario / workflow / channel
+        ↓
+Privacy-minimized trace
+```
+
+## Conversation serialization
+
+A normalized conversation is keyed by bot + channel + conversation. The scheduler accepts only a bounded number of pending turns and runs one turn at a time for a key. Different keys are independent, so unrelated customers stay concurrent.
+
+This deliberately implements **serialization before debounce**. Bot Hub does not merge multiple customer messages yet because merging changes message semantics and provider acknowledgement behavior. Queue overload returns a retryable `429` result instead of growing memory without bounds. Multi-replica ordering still requires a shared queue/lock layer such as Redis.
+
+## Public-server trust boundary
+
+```text
+Internet
+  ├─ /api/health        public
+  ├─ /webhooks/*        public + provider signature/secret verification
+  ├─ /connect/*         public temporary authorization handoff
+  └─ dashboard + other /api/*
+         ↓
+     AdminAuth
+       ├─ configured token → HTTP Basic authentication
+       └─ no token → loopback only; remote request fails closed
+```
+
+The embedded Windows desktop runtime remains loopback-only and does not use the public-server Basic-auth wrapper. This preserves the simple desktop flow while preventing an accidental `HOST=0.0.0.0` VPS configuration from publishing Bot Hub management APIs without credentials.
+
+This is not full enterprise RBAC. Multi-user accounts, roles, tenant isolation, session revocation and identity-backed audit remain separate work.
+
+## Deliberate differences
+
+Customer Service Bot is a focused customer-service product, not a general-purpose coding/OS agent gateway. Therefore:
+
+- Runtime skills do not receive shell access.
+- Runtime skills cannot install pip/npm/system dependencies.
+- There is no generic `exec` tool exposed to customer conversations.
+- External provider credentials remain environment/config secrets, not skill content.
+- Product, order, price, promotion, policy and stock facts require business knowledge grounding.
+- Zalo/Meta/TikTok integration remains tied to approved provider APIs/capabilities rather than personal-session automation.
+- The first VPS auth layer is intentionally simple and operator-oriented; it is not presented as enterprise IAM/RBAC.
+
+## Next architecture phases
+
+1. Move bot, skill, trace, session and idempotency state to PostgreSQL/Redis for multi-replica VPS deployments.
+2. Add persistent conversation/session history with retention, deletion/export and PII controls.
+3. Add bounded inbound debounce only after provider acknowledgement/merge semantics are explicitly defined.
+4. Add provider health/cooldown/usage accounting around the existing ordered fallback list.
+5. Add document ingestion workers for PDF/DOCX/XLSX/PPTX with file-type-specific validation.
+6. Replace the single-operator admin gate with authenticated users/RBAC when shared enterprise administration is required.
+7. Re-evaluate MCP and sandboxed script skills only after permission, audit and isolation layers exist.
