@@ -2,9 +2,10 @@ import http from 'node:http';
 import { createApp } from './app.js';
 import { AdminAuth, protectAdminSurface } from './core/admin-auth.js';
 import { attachConversationPersistence } from './core/conversation-runtime.js';
+import { attachOperationsCenter } from './core/operations-runtime.js';
 import { applyWebConsoleCors } from './core/web-console-cors.js';
 
-const app = attachConversationPersistence(createApp());
+const app = attachOperationsCenter(attachConversationPersistence(createApp()));
 const adminAuth = new AdminAuth(app.config.admin);
 const protectedHandler = protectAdminSurface(app.handler, adminAuth);
 const server = http.createServer((request, response) => {
@@ -24,7 +25,8 @@ server.listen(app.config.port, app.config.host, () => {
     port: app.config.port,
     adminAuth: adminAuth.mode(),
     webConsoleOrigins: app.config.webConsole?.origins?.length || 0,
-    conversationStore: app.conversations?.snapshot?.().backend || 'disabled'
+    conversationStore: app.conversations?.snapshot?.().backend || 'disabled',
+    operations: Boolean(app.operations)
   })}\n`);
 });
 
