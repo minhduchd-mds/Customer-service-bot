@@ -1,7 +1,7 @@
 const ALLOWED_PREFIXES = [
   'health', 'bots', 'channels', 'metrics', 'scenario-templates', 'deployment',
   'skills', 'tool-policy', 'traces', 'connect', 'knowledge', 'simulate',
-  'conversations', 'tickets', 'maintenance'
+  'conversations', 'tickets', 'maintenance', 'operations'
 ];
 
 export default async function handler(request, response) {
@@ -9,7 +9,7 @@ export default async function handler(request, response) {
   if (!runtimeBase) {
     return response.status(503).json({
       error: 'runtime_not_configured',
-      message: 'Set BOT_RUNTIME_URL in Vercel to the public HTTPS URL of the Docker/VPS Bot Hub runtime.'
+      message: 'Set BOT_RUNTIME_URL in Vercel to the public HTTPS URL of the Docker/VPS Bot Hub runtime, or use ?runtime=local for Docker on this computer.'
     });
   }
 
@@ -18,9 +18,7 @@ export default async function handler(request, response) {
     : String(request.query?.path || '').split('/').filter(Boolean);
   const relative = segments.map((segment) => encodeURIComponent(decodeURIComponent(segment))).join('/');
   const first = segments[0] || '';
-  if (!ALLOWED_PREFIXES.includes(first)) {
-    return response.status(404).json({ error: 'not_found' });
-  }
+  if (!ALLOWED_PREFIXES.includes(first)) return response.status(404).json({ error: 'not_found' });
 
   const target = new URL(`/api/${relative}`, runtimeBase);
   for (const [key, value] of Object.entries(request.query || {})) {
@@ -35,7 +33,6 @@ export default async function handler(request, response) {
     'x-forwarded-host': request.headers.host || '',
     'x-bot-hub-console': 'vercel'
   };
-
   const user = process.env.BOT_RUNTIME_ADMIN_USER || 'admin';
   const token = process.env.BOT_RUNTIME_ADMIN_TOKEN || '';
   if (token) headers.authorization = `Basic ${Buffer.from(`${user}:${token}`).toString('base64')}`;
@@ -52,7 +49,7 @@ export default async function handler(request, response) {
     if (contentType) response.setHeader('content-type', contentType);
     response.setHeader('cache-control', 'no-store');
     return response.send(body);
-  } catch (error) {
+  } catch {
     return response.status(502).json({
       error: 'runtime_unreachable',
       message: 'The hosted console could not reach the configured Bot Hub runtime.'
@@ -65,12 +62,9 @@ function normalizeRuntimeBase(value) {
   if (!text) return '';
   try {
     const url = new URL(text);
-    if (url.protocol !== 'https:') return '';
-    if (url.username || url.password) return '';
+    if (url.protocol !== 'https:' || url.username || url.password) return '';
     return url.origin;
-  } catch {
-    return '';
-  }
+  } catch { return ''; }
 }
 
 function serializeBody(body, contentType) {
