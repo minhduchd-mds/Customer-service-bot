@@ -1,11 +1,11 @@
 {
   "name": "customer-service-bot",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "main": "desktop/main.js",
-  "description": "Multi-bot omnichannel customer-service Bot Hub with durable conversations, safe dynamic skills, runtime governance, Windows desktop, Docker/VPS and approved channel integrations.",
-  "engines": { "node": ">=22" },
+  "description": "Multi-bot omnichannel customer-service Bot Hub with durable conversations, encrypted credentials, embeddable web chat, safe dynamic skills, runtime governance, Windows desktop, Docker/VPS and approved channel integrations.",
+  "engines": { "node": "22.x" },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",

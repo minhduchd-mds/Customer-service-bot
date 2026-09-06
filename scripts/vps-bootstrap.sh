@@ -39,6 +39,8 @@ fi
 POSTGRES_PASSWORD="$(random_secret)"
 N8N_ENCRYPTION_KEY="$(random_secret)"
 BOT_HUB_ADMIN_TOKEN="$(random_secret)"
+CREDENTIAL_VAULT_MASTER_KEY="$(random_secret)"
+WEB_WIDGET_SIGNING_KEY="$(random_secret)"
 
 cat > .env <<EOF_ENV
 HOST=0.0.0.0
@@ -58,6 +60,18 @@ CONVERSATION_MAX_MESSAGE_CHARS=8000
 
 BOT_HUB_ADMIN_USER=admin
 BOT_HUB_ADMIN_TOKEN=${BOT_HUB_ADMIN_TOKEN}
+WEB_CONSOLE_ORIGINS=
+
+CREDENTIAL_VAULT_FILE=/app/data/state/credentials.json
+CREDENTIAL_VAULT_MASTER_KEY=${CREDENTIAL_VAULT_MASTER_KEY}
+CREDENTIAL_VAULT_LOCAL_KEY_FILE=/app/data/state/credentials.key
+CREDENTIAL_VAULT_ALLOW_LOCAL_KEY=false
+
+WEB_WIDGET_ENABLED=true
+WEB_WIDGET_ALLOWED_ORIGINS=
+WEB_WIDGET_MAX_MESSAGE_CHARS=2000
+WEB_WIDGET_TOKEN_TTL_SECONDS=900
+WEB_WIDGET_SIGNING_KEY=${WEB_WIDGET_SIGNING_KEY}
 
 KNOWLEDGE_ROOT=/app/data/repos
 KNOWLEDGE_MAX_FILES=2500
@@ -114,12 +128,15 @@ n8n URL: https://${N8N_DOMAIN}
 
 Next steps:
 1. Point both DNS A/AAAA records to this VPS.
-2. Fill provider credentials and approved OAuth URL templates in .env.
-3. Run: docker compose up -d --build
-4. Check: docker compose ps
-5. Verify: https://${BOT_DOMAIN}/api/health
-6. Open https://${BOT_DOMAIN}; the browser will request Basic authentication. User: admin. Password: BOT_HUB_ADMIN_TOKEN from the local .env file.
-7. Back up data/state/conversations.sqlite together with the other Bot Hub state files.
+2. Fill approved provider credentials/OAuth URL templates in .env.
+3. If using the hosted Vercel console, add its origin to WEB_CONSOLE_ORIGINS.
+4. If embedding Web Widget, add each customer website origin to WEB_WIDGET_ALLOWED_ORIGINS.
+5. Run: docker compose up -d --build
+6. Check: docker compose ps
+7. Verify: https://${BOT_DOMAIN}/api/health
+8. Point provider webhooks directly to https://${BOT_DOMAIN}/webhooks/...; do not route signed provider webhooks through Vercel.
+9. Open https://${BOT_DOMAIN}; the browser will request Basic authentication. User: admin. Password: BOT_HUB_ADMIN_TOKEN from the local .env file.
+10. Back up data/state, including conversations.sqlite and encrypted credentials.json.
 
 Deployment secrets were generated directly into .env and were not printed to stdout.
 EOF_MESSAGE

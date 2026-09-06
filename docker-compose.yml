@@ -9,8 +9,16 @@ services:
       PUBLIC_BASE_URL: https://${BOT_DOMAIN:?set BOT_DOMAIN}
       BOT_STORE_FILE: /app/data/state/bots.json
       PLATFORM_SETTINGS_FILE: /app/data/state/platform-settings.json
+      SKILL_STORE_FILE: /app/data/state/skills.json
       CONVERSATION_DB_FILE: /app/data/state/conversations.sqlite
+      CREDENTIAL_VAULT_FILE: /app/data/state/credentials.json
+      CREDENTIAL_VAULT_LOCAL_KEY_FILE: /app/data/state/credentials.key
+      CREDENTIAL_VAULT_ALLOW_LOCAL_KEY: "false"
       KNOWLEDGE_ROOT: /app/data/repos
+      WEB_WIDGET_ENABLED: ${WEB_WIDGET_ENABLED:-true}
+      WEB_WIDGET_ALLOWED_ORIGINS: ${WEB_WIDGET_ALLOWED_ORIGINS:-}
+      WEB_WIDGET_MAX_MESSAGE_CHARS: ${WEB_WIDGET_MAX_MESSAGE_CHARS:-2000}
+      WEB_WIDGET_TOKEN_TTL_SECONDS: ${WEB_WIDGET_TOKEN_TTL_SECONDS:-900}
     volumes:
       - ./data/repos:/app/data/repos:ro
       - ./data/state:/app/data/state

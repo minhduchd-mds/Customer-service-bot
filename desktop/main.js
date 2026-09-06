@@ -5,7 +5,9 @@ import { mkdir } from 'node:fs/promises';
 import { createApp } from '../src/app.js';
 import { attachConnectionActions } from '../src/core/connect-actions-runtime.js';
 import { attachConversationPersistence } from '../src/core/conversation-runtime.js';
+import { attachCredentialVault } from '../src/core/credential-runtime.js';
 import { attachOperationsCenter } from '../src/core/operations-runtime.js';
+import { attachWebWidget } from '../src/core/web-widget-runtime.js';
 import { isLoopbackUrl, selectLanAddress } from './network.js';
 
 const APP_NAME = 'Customer Service Bot';
@@ -82,9 +84,15 @@ async function startEmbeddedRuntime() {
   process.env.PLATFORM_SETTINGS_FILE = path.join(stateDir, 'platform-settings.json');
   process.env.SKILL_STORE_FILE = path.join(stateDir, 'skills.json');
   process.env.CONVERSATION_DB_FILE = path.join(stateDir, 'conversations.sqlite');
+  process.env.CREDENTIAL_VAULT_FILE = path.join(stateDir, 'credentials.json');
+  process.env.CREDENTIAL_VAULT_LOCAL_KEY_FILE = path.join(stateDir, 'credentials.key');
+  process.env.CREDENTIAL_VAULT_ALLOW_LOCAL_KEY = 'true';
+  process.env.WEB_WIDGET_ENABLED = 'true';
   process.env.KNOWLEDGE_ROOT = knowledgeDir;
 
-  const runtime = attachOperationsCenter(attachConversationPersistence(attachConnectionActions(createApp())));
+  let runtime = createApp();
+  await attachCredentialVault(runtime);
+  runtime = attachWebWidget(attachOperationsCenter(attachConversationPersistence(attachConnectionActions(runtime))));
   const server = http.createServer(runtime.handler);
   tuneServer(server);
   await listen(server, '127.0.0.1');
@@ -135,6 +143,12 @@ async function runDesktopSmokeTest(origin, qrOrigin, qrSource) {
 
   const operations = await getJson(`${origin}/api/operations/doctor`, 'operations doctor');
   if (!operations?.doctor || operations.doctor.state?.backend !== 'sqlite') throw new Error('Desktop operations payload is invalid');
+
+  const credentials = await getJson(`${origin}/api/credentials/status`, 'credential vault');
+  if (!credentials?.vault?.enabled || credentials.vault.mode !== 'local-key') throw new Error('Desktop credential vault is not enabled with a local key');
+
+  const widgetScript = await fetch(`${origin}/widget.js`, { signal: AbortSignal.timeout(10_000) });
+  if (!widgetScript.ok || !String(widgetScript.headers.get('content-type') || '').includes('javascript')) throw new Error('Desktop web widget asset is unavailable');
 
   if (qrSource === 'lan' && qrOrigin) {
     const handoffResponse = await fetch(`${qrOrigin}/connect/desktop-smoke-invalid`, { signal: AbortSignal.timeout(10_000) });

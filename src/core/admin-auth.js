@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
-const PUBLIC_PREFIXES = ['/webhooks/', '/connect/'];
-const PUBLIC_EXACT = new Set(['/api/health']);
+const PUBLIC_PREFIXES = ['/webhooks/', '/connect/', '/api/widget/'];
+const PUBLIC_EXACT = new Set(['/api/health', '/widget.js', '/widget.html']);
 
 function digest(value) {
   return createHash('sha256').update(String(value || '')).digest();

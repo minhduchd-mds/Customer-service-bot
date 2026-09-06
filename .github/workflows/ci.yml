@@ -19,6 +19,19 @@ jobs:
           node-version: 22
       - run: npm run check
       - run: npm test
+      - name: Validate deployment configuration
+        env:
+          BOT_DOMAIN: bot.example.test
+          N8N_DOMAIN: n8n.example.test
+          POSTGRES_PASSWORD: ci-postgres-password
+          N8N_ENCRYPTION_KEY: ci-n8n-encryption-key
+          CREDENTIAL_VAULT_MASTER_KEY: ci-vault-master-key
+          WEB_WIDGET_SIGNING_KEY: ci-widget-signing-key
+        run: |
+          sh -n scripts/vps-bootstrap.sh
+          node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); JSON.parse(require('fs').readFileSync('vercel.json','utf8'));"
+          docker compose config >/dev/null
+          docker compose -f docker-compose.desktop.yml config >/dev/null
 
   docker:
     runs-on: ubuntu-latest

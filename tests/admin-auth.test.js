@@ -30,11 +30,15 @@ test('admin auth recognizes loopback and narrow public runtime paths', () => {
   assert.equal(isPublicRuntimePath('/api/health'), true);
   assert.equal(isPublicRuntimePath('/webhooks/zalo'), true);
   assert.equal(isPublicRuntimePath('/connect/example'), true);
+  assert.equal(isPublicRuntimePath('/widget.js'), true);
+  assert.equal(isPublicRuntimePath('/widget.html'), true);
+  assert.equal(isPublicRuntimePath('/api/widget/bot-1/message'), true);
+  assert.equal(isPublicRuntimePath('/api/credentials'), false);
   assert.equal(isPublicRuntimePath('/api/bots'), false);
   assert.equal(isPublicRuntimePath('/'), false);
 });
 
-test('configured admin token protects dashboard and management API but leaves provider surfaces public', async () => {
+test('configured admin token protects dashboard and management API but leaves provider/widget surfaces public', async () => {
   const auth = new AdminAuth({ user: 'admin', token: 'correct-horse-battery-staple' });
   await withServer(auth, async (origin) => {
     const root = await fetch(`${origin}/`);
@@ -43,12 +47,17 @@ test('configured admin token protects dashboard and management API but leaves pr
 
     const api = await fetch(`${origin}/api/bots`);
     assert.equal(api.status, 401);
+    const credentials = await fetch(`${origin}/api/credentials`);
+    assert.equal(credentials.status, 401);
 
     const health = await fetch(`${origin}/api/health`);
     assert.equal(health.status, 200);
-
     const webhook = await fetch(`${origin}/webhooks/telegram`);
     assert.equal(webhook.status, 200);
+    const widgetScript = await fetch(`${origin}/widget.js`);
+    assert.equal(widgetScript.status, 200);
+    const widgetApi = await fetch(`${origin}/api/widget/bot/message`);
+    assert.equal(widgetApi.status, 200);
 
     const authorized = await fetch(`${origin}/api/bots`, {
       headers: { authorization: `Basic ${Buffer.from('admin:correct-horse-battery-staple').toString('base64')}` }

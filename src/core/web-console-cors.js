@@ -1,4 +1,14 @@
+const WIDGET_PUBLIC_EXACT = new Set(['/widget.js', '/widget.html']);
+
+export function isWidgetPublicPath(pathname = '/') {
+  return WIDGET_PUBLIC_EXACT.has(pathname) || pathname.startsWith('/api/widget/');
+}
+
 export function applyWebConsoleCors(request, response, { origins = [] } = {}) {
+  let pathname = '/';
+  try { pathname = new URL(request.url || '/', 'http://bot-hub.local').pathname; } catch {}
+  if (isWidgetPublicPath(pathname)) return { handled: false, allowed: true, skipped: 'widget' };
+
   const origin = String(request.headers?.origin || '').trim();
   if (!origin) return { handled: false, allowed: true };
 

@@ -10,8 +10,11 @@
     }
   },
   "rewrites": [
-    { "source": "/connect/:path*", "destination": "/api/connect/:path*" },
-    { "source": "/webhooks/:path*", "destination": "/api/webhooks/:path*" },
+    { "source": "/api/:path*", "destination": "/api/router?path=:path*" },
+    { "source": "/connect/:path*", "destination": "/api/router?path=connect/:path*" },
+    { "source": "/webhooks/:path*", "destination": "/api/router?path=webhooks/:path*" },
+    { "source": "/widget.js", "destination": "/api/router?path=widget.js" },
+    { "source": "/widget.html", "destination": "/api/router?path=widget.html" },
     { "source": "/", "destination": "/index.html" }
   ],
   "headers": [

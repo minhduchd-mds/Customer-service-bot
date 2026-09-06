@@ -48,7 +48,9 @@ export function loadConfig(env = process.env) {
     webWidget: {
       enabled: bool(env.WEB_WIDGET_ENABLED, true),
       allowedOrigins: csv(env.WEB_WIDGET_ALLOWED_ORIGINS),
-      maxMessageChars: int(env.WEB_WIDGET_MAX_MESSAGE_CHARS, 2000)
+      maxMessageChars: int(env.WEB_WIDGET_MAX_MESSAGE_CHARS, 2000),
+      signingKey: env.WEB_WIDGET_SIGNING_KEY || '',
+      tokenTtlSeconds: Math.max(60, Math.min(int(env.WEB_WIDGET_TOKEN_TTL_SECONDS, 900), 3600))
     },
     credentials: {
       file: env.CREDENTIAL_VAULT_FILE || './data/state/credentials.json',

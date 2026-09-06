@@ -1,19 +1,31 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { qrSvg } from '../src/lib/qr.js';
 import { listScenarioTemplates, scenarioFromTemplate } from '../src/core/scenario.js';
 
 const ALLOWED_PREFIXES = [
   'health', 'bots', 'channels', 'metrics', 'scenario-templates', 'deployment',
   'skills', 'tool-policy', 'traces', 'connect', 'knowledge', 'simulate',
-  'conversations', 'tickets', 'maintenance', 'operations', 'webhooks'
+  'conversations', 'tickets', 'maintenance', 'operations', 'credentials', 'widget'
 ];
+const PUBLIC_ASSETS = new Set(['widget.js', 'widget.html']);
+const CHANNEL_CODES = { zalo: 'z', facebook: 'f', telegram: 'g', tiktok: 't' };
+const CODE_CHANNELS = { z: 'zalo', f: 'facebook', g: 'telegram', t: 'tiktok' };
 
 export default async function handler(request, response) {
   const segments = pathSegments(request);
   const first = segments[0] || '';
-  if (!ALLOWED_PREFIXES.includes(first)) return sendJson(response, 404, { error: 'not_found' });
-
   const runtimeBase = normalizeRuntimeBase(process.env.BOT_RUNTIME_URL || '');
+
+  if (first === 'webhooks') {
+    return sendJson(response, 503, {
+      error: 'direct_runtime_webhook_required',
+      message: 'Provider webhooks must target the Bot Hub VPS/runtime directly so signed raw request bytes are verified without a serverless proxy.',
+      runtimeBase: runtimeBase || null
+    });
+  }
+
+  if (!ALLOWED_PREFIXES.includes(first) && !PUBLIC_ASSETS.has(first)) return sendJson(response, 404, { error: 'not_found' });
+
   if (runtimeBase) {
     try {
       return await proxyToRuntime({ request, response, runtimeBase, segments });
@@ -33,9 +45,12 @@ export default async function handler(request, response) {
 
 async function proxyToRuntime({ request, response, runtimeBase, segments }) {
   const relative = segments.map((segment) => encodeURIComponent(decodeURIComponent(segment))).join('/');
-  const targetPath = segments[0] === 'webhooks' || (segments[0] === 'connect' && segments[1] !== 'sessions')
-    ? `/${relative}`
-    : `/api/${relative}`;
+  const first = segments[0] || '';
+  const targetPath = PUBLIC_ASSETS.has(first)
+    ? `/${first}`
+    : first === 'connect' && segments[1] !== 'sessions'
+      ? `/${relative}`
+      : `/api/${relative}`;
   const target = new URL(targetPath, runtimeBase);
   for (const [key, value] of Object.entries(request.query || {})) {
     if (key === 'path') continue;
@@ -47,13 +62,17 @@ async function proxyToRuntime({ request, response, runtimeBase, segments }) {
     accept: request.headers.accept || 'application/json',
     'content-type': request.headers['content-type'] || 'application/json',
     'x-forwarded-host': request.headers.host || '',
+    'x-forwarded-proto': request.headers['x-forwarded-proto'] || 'https',
     'x-bot-hub-console': 'vercel'
   };
+  for (const name of ['origin', 'referer', 'x-bot-hub-widget-token']) {
+    if (request.headers[name]) headers[name] = request.headers[name];
+  }
+
+  const publicRuntimeSurface = first === 'connect' || first === 'widget' || PUBLIC_ASSETS.has(first);
   const token = process.env.BOT_RUNTIME_ADMIN_TOKEN || '';
   const user = process.env.BOT_RUNTIME_ADMIN_USER || 'admin';
-  if (token && segments[0] !== 'webhooks' && segments[0] !== 'connect') {
-    headers.authorization = `Basic ${Buffer.from(`${user}:${token}`).toString('base64')}`;
-  }
+  if (token && !publicRuntimeSurface) headers.authorization = `Basic ${Buffer.from(`${user}:${token}`).toString('base64')}`;
 
   const method = request.method || 'GET';
   const init = { method, headers, redirect: 'manual', signal: AbortSignal.timeout(25_000) };
@@ -62,8 +81,13 @@ async function proxyToRuntime({ request, response, runtimeBase, segments }) {
   const upstream = await fetch(target, init);
   const body = Buffer.from(await upstream.arrayBuffer());
   response.status(upstream.status);
-  const contentType = upstream.headers.get('content-type');
-  if (contentType) response.setHeader('content-type', contentType);
+  for (const name of [
+    'content-type', 'location', 'content-security-policy', 'referrer-policy', 'x-content-type-options',
+    'access-control-allow-origin', 'access-control-allow-methods', 'access-control-allow-headers', 'vary'
+  ]) {
+    const value = upstream.headers.get(name);
+    if (value) response.setHeader(name, value);
+  }
   response.setHeader('cache-control', 'no-store');
   return response.send(body);
 }
@@ -100,7 +124,12 @@ async function previewHandler({ request, response, segments, reason }) {
   if (method === 'GET' && first === 'conversations') return sendJson(response, 200, { conversations: [] });
   if (method === 'GET' && first === 'tickets') return sendJson(response, 200, { tickets: [] });
   if (method === 'GET' && first === 'operations') return sendJson(response, 200, { doctor: { status: 'preview', checks: [] } });
-  if (first === 'webhooks') return sendJson(response, 200, { ok: true, preview: true, message: 'Webhook proxy preview accepted the request. Configure BOT_RUNTIME_URL for live dispatch.' });
+  if (first === 'credentials' || first === 'widget' || PUBLIC_ASSETS.has(first)) {
+    return sendJson(response, 503, {
+      error: 'live_runtime_required',
+      message: `${first.startsWith('widget') ? 'Web Widget' : 'Credential Vault'} is available only through the connected Bot Hub runtime. Configure BOT_RUNTIME_URL.`
+    });
+  }
 
   if (first === 'bots') return botPreviewApi({ request, response, segments, store });
   if (first === 'connect') return connectPreviewApi({ request, response, segments, store });
@@ -169,6 +198,11 @@ async function botPreviewApi({ request, response, segments, store }) {
 
 async function connectPreviewApi({ request, response, segments, store }) {
   const method = request.method || 'GET';
+
+  if (segments[1] === 'callback' && method === 'GET') {
+    return sendHtml(response, 503, connectShell('<div class="mark">!</div><p class="eyebrow">Live runtime required</p><h1>OAuth callback cannot finish in Vercel preview</h1><p class="muted">Configure BOT_RUNTIME_URL and use the public HTTPS runtime callback URL. Preview mode never claims provider authorization succeeded.</p>'));
+  }
+
   if (segments[1] === 'sessions' && segments.length === 2 && method === 'POST') {
     const payload = await requestBody(request);
     const bot = store.bots.find((item) => item.id === payload.botId);
@@ -179,9 +213,10 @@ async function connectPreviewApi({ request, response, segments, store }) {
       upsertChannel(bot, channel, { status: 'connected', connectionId: 'web-preview', connectedAt: new Date().toISOString() });
       return sendJson(response, 201, { instant: true, bot });
     }
-    const token = randomBytes(10).toString('base64url');
+    const expiresAt = Date.now() + 600_000;
+    const token = createPreviewSessionToken({ botId: bot.id, channel, expiresAt });
     const origin = publicOrigin(request);
-    const session = { token, botId: bot.id, channel, status: 'pending', createdAt: Date.now(), expiresAt: Date.now() + 600_000, connectionUrl: `${origin}/connect/${token}`, preview: true };
+    const session = { token, botId: bot.id, channel, status: 'pending', createdAt: Date.now(), expiresAt, connectionUrl: `${origin}/connect/${token}`, preview: true };
     store.sessions[token] = session;
     upsertChannel(bot, channel, { status: 'pending', connectionId: token });
     let svg = null;
@@ -190,40 +225,66 @@ async function connectPreviewApi({ request, response, segments, store }) {
   }
 
   if (segments[1] === 'sessions' && segments[2] && method === 'GET') {
-    const session = store.sessions[segments[2]];
+    const session = store.sessions[segments[2]] || decodePreviewSessionToken(segments[2]);
     if (!session) return sendJson(response, 404, { error: 'connect_session_not_found' });
     return sendJson(response, 200, { session });
   }
 
   const token = segments[1];
-  const session = store.sessions[token];
+  const session = store.sessions[token] || decodePreviewSessionToken(token);
   if (!session) return sendHtml(response, 404, connectShell('<div class="mark">!</div><p class="eyebrow">Bot Hub</p><h1>QR expired</h1><p class="muted">Create a new connection QR from the dashboard.</p>'));
-  const bot = store.bots.find((item) => item.id === session.botId);
+  const bot = store.bots.find((item) => item.id === session.botId) || { id: session.botId, name: 'Preview Bot', channels: [] };
   if (segments[2] === 'confirm' && method === 'POST') {
     session.status = 'setup_reviewed';
     session.providerState = 'manual_confirmation';
-    if (bot) upsertChannel(bot, session.channel, { status: 'setup_reviewed', connectionId: token, reviewedAt: new Date().toISOString() });
+    const storedBot = store.bots.find((item) => item.id === session.botId);
+    if (storedBot) upsertChannel(storedBot, session.channel, { status: 'setup_reviewed', connectionId: token, reviewedAt: new Date().toISOString() });
     return sendHtml(response, 200, connectShell(successContent(session.channel)));
   }
   if (method === 'GET' && segments.length === 2) {
     session.status = 'authorizing';
     return sendHtml(response, 200, connectShell(connectContent({ session, bot, origin: publicOrigin(request), preview: true })));
   }
-  if (segments[1] === 'callback' && method === 'GET') return sendHtml(response, 200, connectShell(successContent(segments[2] || 'provider')));
   return sendJson(response, 404, { error: 'not_found' });
+}
+
+function createPreviewSessionToken({ botId, channel, expiresAt }) {
+  const suffix = String(botId || '').replace(/^bot_preview_/, '').slice(0, 12) || createHash('sha256').update(String(botId || '')).digest('hex').slice(0, 12);
+  const code = CHANNEL_CODES[channel];
+  const exp = Math.floor(Number(expiresAt) / 1000).toString(36);
+  const unsigned = `${suffix}.${code}.${exp}`;
+  const signature = createHash('sha256').update(`${unsigned}.${previewIntegrityKey()}`).digest('base64url').slice(0, 10);
+  return `p.${unsigned}.${signature}`;
+}
+
+function decodePreviewSessionToken(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 5 || parts[0] !== 'p') return null;
+  const [, suffix, code, expText, signature] = parts;
+  const channel = CODE_CHANNELS[code];
+  const expiresAt = Number.parseInt(expText, 36) * 1000;
+  if (!/^[a-f0-9]{12}$/.test(suffix) || !channel || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
+  const unsigned = `${suffix}.${code}.${expText}`;
+  const expected = createHash('sha256').update(`${unsigned}.${previewIntegrityKey()}`).digest('base64url').slice(0, 10);
+  if (signature !== expected) return null;
+  return { token, botId: `bot_preview_${suffix}`, channel, status: 'pending', createdAt: expiresAt - 600_000, expiresAt, connectionUrl: '', preview: true, stateless: true };
+}
+
+function previewIntegrityKey() {
+  return process.env.VERCEL_PREVIEW_SIGNING_KEY || 'bot-hub-vercel-preview-integrity-v1';
 }
 
 function previewDeploymentPayload(request, reason) {
   const origin = publicOrigin(request);
   return {
     deployment: { mode: 'vercel-preview', publicReady: false, draftReady: false, activePublicBaseUrl: '', publicBaseUrl: origin, qrMode: 'vercel-preview', requiresRestartOrDeploy: true },
-    dockerEnv: `BOT_RUNTIME_URL=https://bot.example.com\nBOT_RUNTIME_ADMIN_USER=admin\nBOT_RUNTIME_ADMIN_TOKEN=<token-from-vps-env>\n`,
+    dockerEnv: 'BOT_RUNTIME_URL=https://bot.example.com\nBOT_RUNTIME_ADMIN_USER=admin\nBOT_RUNTIME_ADMIN_TOKEN=<token-from-vps-env>\n',
     commands: {
       connectRuntime: 'Vercel → Settings → Environment Variables → BOT_RUNTIME_URL=https://<bot-domain>',
       strictMode: 'Optional: BOT_RUNTIME_STRICT=true disables preview fallback',
       health: `${origin}/api/health`
     },
-    note: `Hosted console is running in preview fallback (${reason}). Configure BOT_RUNTIME_URL to control the real Docker/VPS runtime.`
+    note: `Hosted console is running in preview fallback (${reason}). Configure BOT_RUNTIME_URL to control the real Docker/VPS runtime. Provider webhooks must point directly to that runtime.`
   };
 }
 
@@ -240,7 +301,15 @@ function previewStore() {
 
 function pathSegments(request) {
   const raw = request.query?.path;
-  return Array.isArray(raw) ? raw.filter(Boolean).map(String) : String(raw || '').split('/').filter(Boolean);
+  if (Array.isArray(raw)) return raw.filter(Boolean).map(String);
+  if (raw) return String(raw).split('/').filter(Boolean);
+  try {
+    const pathname = new URL(request.url || '/', 'http://vercel.local').pathname;
+    const value = pathname.startsWith('/api/') ? pathname.slice(5) : pathname.slice(1);
+    return value.split('/').filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 async function requestBody(request) {
@@ -265,26 +334,25 @@ function upsertChannel(bot, channel, patch) {
 
 function connectContent({ session, bot, origin, preview }) {
   const title = channelTitle(session.channel);
-  const webhook = `${origin}/webhooks/${encodeURIComponent(session.botId)}/${encodeURIComponent(session.channel)}`;
   return `
     <div class="mark">⌁</div><p class="eyebrow">Bot Hub connection</p><h1>Connect ${escapeHtml(title)}</h1>
-    <p class="muted">You are connecting <strong>${escapeHtml(bot?.name || 'Preview Bot')}</strong>. This QR is a temporary handoff URL. ${preview ? 'This Vercel page is preview-only until BOT_RUNTIME_URL points to the VPS runtime.' : ''}</p>
-    <div class="notice"><strong>Webhook / callback</strong><br><code>${escapeHtml(webhook)}</code></div>
+    <p class="muted">You are connecting <strong>${escapeHtml(bot?.name || 'Preview Bot')}</strong>. ${preview ? 'This Vercel page is preview-only until BOT_RUNTIME_URL points to the VPS runtime.' : ''}</p>
+    <div class="notice"><strong>Production webhook</strong><br><code>Configure BOT_RUNTIME_URL and point the provider directly to https://&lt;BOT_DOMAIN&gt;/webhooks/${escapeHtml(session.botId)}/${escapeHtml(session.channel)}</code></div>
     <ol>${channelSteps(session.channel).map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
-    <form method="post" action="/connect/${escapeHtml(session.token)}/confirm"><button class="primary" type="submit">I have configured this channel</button></form>
-    <p class="foot">Zalo/Facebook/TikTok production requires official provider approval and token exchange. Bot Hub does not capture personal QR-login cookies.</p>`;
+    <form method="post" action="/connect/${escapeHtml(session.token)}/confirm"><button class="primary" type="submit">I have reviewed this setup</button></form>
+    <p class="foot">Preview confirmation is not provider authorization. Zalo/Facebook/TikTok production requires official provider approval and token exchange.</p>`;
 }
 
 function successContent(channel) {
-  return `<div class="mark">✓</div><p class="eyebrow">Setup reviewed</p><h1>${escapeHtml(channelTitle(channel))} action saved</h1><p class="muted">Bot Hub marked this connection as <strong>setup reviewed</strong>. Return to the dashboard to continue. Production outbound still requires the provider token/capability to be configured on the runtime.</p>`;
+  return `<div class="mark">✓</div><p class="eyebrow">Preview reviewed</p><h1>${escapeHtml(channelTitle(channel))} setup reviewed</h1><p class="muted">This preview action was saved for the current preview instance. Connect BOT_RUNTIME_URL and complete a real provider test before treating the channel as connected.</p>`;
 }
 
 function channelSteps(channel) {
   return ({
-    zalo: ['Use Zalo OA/Bot official developer console.', 'Set the public HTTPS webhook/callback URL.', 'Add approved app token/secret on the VPS runtime.', 'Send a real test event after saving.'],
-    facebook: ['Create/choose a Meta app and Page.', 'Set callback URL and verify token.', 'Configure app secret and page access token on the VPS runtime.', 'Send a test Messenger webhook.'],
-    telegram: ['Open BotFather and create/copy bot token.', 'Paste the token in Bot Hub runtime .env or channel settings.', 'Set webhook to the Bot Hub public URL.', 'Send the bot a test message.'],
-    tiktok: ['Use the approved TikTok developer product.', 'Configure the webhook URL and signing secret.', 'Enable outbound only if your app has an approved messaging capability.', 'Send a test event.']
+    zalo: ['Use Zalo OA/Bot official developer console.', 'Set the public HTTPS webhook/callback on the real VPS runtime.', 'Add approved app token/secret on the runtime.', 'Send a real test event after saving.'],
+    facebook: ['Create/choose a Meta app and Page.', 'Set the real runtime callback URL and verify token.', 'Configure app secret and page access token on the runtime.', 'Send a test Messenger webhook.'],
+    telegram: ['Open BotFather and create/copy bot token.', 'Paste the token in the real Bot Hub runtime.', 'Set webhook to the real Bot Hub public URL.', 'Send the bot a test message.'],
+    tiktok: ['Use the approved TikTok developer product.', 'Configure the real runtime webhook and signing secret.', 'Enable outbound only if the app has an approved messaging capability.', 'Send a test event.']
   })[channel] || ['Configure the official provider credentials.', 'Send a test event.'];
 }
 
