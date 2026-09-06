@@ -1,16 +1,18 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
+  "installCommand": "npm install --omit=dev --no-audit --no-fund",
+  "buildCommand": "node -e \"console.log('Bot Hub Vercel console build')\"",
+  "outputDirectory": "public",
   "functions": {
     "api/**/*.js": {
       "maxDuration": 30
     }
   },
   "rewrites": [
-    {
-      "source": "/",
-      "destination": "/index.html"
-    }
+    { "source": "/connect/:path*", "destination": "/api/connect/:path*" },
+    { "source": "/webhooks/:path*", "destination": "/api/webhooks/:path*" },
+    { "source": "/", "destination": "/index.html" }
   ],
   "headers": [
     {

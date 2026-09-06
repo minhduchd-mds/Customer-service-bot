@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { HttpError } from '../lib/http.js';
 
 const CHANNELS = new Set(['zalo', 'facebook', 'telegram', 'tiktok', 'web']);
+const STATUSES = new Set(['pending', 'authorizing', 'setup_reviewed', 'authorization_received', 'connected', 'failed', 'expired']);
 
 export class ConnectSessionStore {
   constructor({ ttlSeconds = 600, publicBaseUrl = '', now = () => Date.now() } = {}) {
@@ -52,7 +53,7 @@ export class ConnectSessionStore {
     this.cleanup();
     const item = this.items.get(token);
     if (!item) return null;
-    if (['pending', 'authorizing', 'connected', 'failed', 'expired'].includes(patch.status)) item.status = patch.status;
+    if (STATUSES.has(patch.status)) item.status = patch.status;
     if (patch.providerState != null) item.providerState = String(patch.providerState).slice(0, 256);
     if (patch.error != null) item.error = String(patch.error).slice(0, 500);
     return { ...item };

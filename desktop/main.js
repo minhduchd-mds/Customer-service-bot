@@ -3,6 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createApp } from '../src/app.js';
+import { attachConnectionActions } from '../src/core/connect-actions-runtime.js';
 import { attachConversationPersistence } from '../src/core/conversation-runtime.js';
 import { attachOperationsCenter } from '../src/core/operations-runtime.js';
 import { isLoopbackUrl, selectLanAddress } from './network.js';
@@ -83,7 +84,7 @@ async function startEmbeddedRuntime() {
   process.env.CONVERSATION_DB_FILE = path.join(stateDir, 'conversations.sqlite');
   process.env.KNOWLEDGE_ROOT = knowledgeDir;
 
-  const runtime = attachOperationsCenter(attachConversationPersistence(createApp()));
+  const runtime = attachOperationsCenter(attachConversationPersistence(attachConnectionActions(createApp())));
   const server = http.createServer(runtime.handler);
   tuneServer(server);
   await listen(server, '127.0.0.1');
@@ -138,6 +139,8 @@ async function runDesktopSmokeTest(origin, qrOrigin, qrSource) {
   if (qrSource === 'lan' && qrOrigin) {
     const handoffResponse = await fetch(`${qrOrigin}/connect/desktop-smoke-invalid`, { signal: AbortSignal.timeout(10_000) });
     if (handoffResponse.status !== 404) throw new Error(`Desktop LAN handoff returned unexpected status ${handoffResponse.status}`);
+    const postResponse = await fetch(`${qrOrigin}/connect/desktop-smoke-invalid/confirm`, { method: 'POST', signal: AbortSignal.timeout(10_000) });
+    if (postResponse.status !== 404) throw new Error(`Desktop LAN handoff POST returned unexpected status ${postResponse.status}`);
   }
 }
 
@@ -184,7 +187,7 @@ function connectOnlyHandler(appHandler) {
       response.end('Bad request');
       return;
     }
-    if (request.method === 'GET' && pathname.startsWith('/connect/')) return appHandler(request, response);
+    if ((request.method === 'GET' || request.method === 'POST') && pathname.startsWith('/connect/')) return appHandler(request, response);
     response.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
     response.end(JSON.stringify({ error: 'not_found' }));
   };
