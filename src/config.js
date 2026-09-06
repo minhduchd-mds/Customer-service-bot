@@ -30,6 +30,7 @@ const jsonArray = (value) => {
 };
 
 export function loadConfig(env = process.env) {
+  const geminiScopes = csv(env.GEMINI_OAUTH_SCOPES);
   return {
     host: env.HOST || '0.0.0.0',
     port: int(env.PORT, 8787),
@@ -57,6 +58,17 @@ export function loadConfig(env = process.env) {
       masterKey: env.CREDENTIAL_VAULT_MASTER_KEY || env.BOT_HUB_MASTER_KEY || '',
       localKeyFile: env.CREDENTIAL_VAULT_LOCAL_KEY_FILE || './data/state/credentials.key',
       allowLocalKey: bool(env.CREDENTIAL_VAULT_ALLOW_LOCAL_KEY, false)
+    },
+    aiConnections: {
+      file: env.AI_CONNECTION_STORE_FILE || './data/state/ai-connections.json',
+      timeoutMs: Math.max(1000, int(env.AI_CONNECTION_TIMEOUT_MS, int(env.AI_TIMEOUT_MS, 20000))),
+      oauthSessionTtlSeconds: Math.max(120, Math.min(int(env.AI_OAUTH_SESSION_TTL_SECONDS, 600), 1800)),
+      geminiOAuth: {
+        clientId: env.GEMINI_OAUTH_CLIENT_ID || '',
+        clientSecret: env.GEMINI_OAUTH_CLIENT_SECRET || '',
+        redirectUri: env.GEMINI_OAUTH_REDIRECT_URI || '',
+        scopes: geminiScopes.length ? geminiScopes : ['openid', 'email', 'https://www.googleapis.com/auth/cloud-platform']
+      }
     },
     conversations: {
       file: env.CONVERSATION_DB_FILE || './data/state/conversations.sqlite',
