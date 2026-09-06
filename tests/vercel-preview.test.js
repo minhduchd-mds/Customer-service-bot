@@ -43,7 +43,8 @@ test('Vercel API falls back to usable preview mode when BOT_RUNTIME_URL is not c
 
     const page = await call(`/api/connect/${qr.body.session.token}`, { accept: 'text/html' });
     assert.equal(page.statusCode, 200);
-    assert.match(String(page.body), /I have configured this channel/);
+    assert.match(String(page.body), /I have reviewed this setup/);
+    assert.match(String(page.body), /Preview confirmation is not provider authorization/);
   } finally {
     if (previous == null) delete process.env.BOT_RUNTIME_URL;
     else process.env.BOT_RUNTIME_URL = previous;

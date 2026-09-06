@@ -1,133 +1,102 @@
 # Customer Service Bot — Bot Hub
 
-A self-hosted **multi-bot omnichannel customer-service platform** for Windows desktop, Docker/VPS, Telegram, Facebook Messenger, Zalo Official Account, TikTok webhooks, Web Chat and n8n.
+Self-hosted omnichannel customer-service platform for Windows, Docker/VPS and a Vercel-hosted management console.
 
-The operator flow is intentionally simple:
+> Create → Connect → Teach → Go Live → Operate from Inbox
 
-> **Create → Connect → Teach → Go Live → Operate from Inbox**
+## v0.7.0
 
-Behind that flow, each bot keeps its own identity, intelligence mode, channels, Product/Business Knowledge, runtime skills, tool policy and scenarios while `Router9` runs inbound events through authenticity, normalization, idempotency, policy, intent/skill, knowledge, response and workflow/dispatch stages.
+Bot Hub currently includes:
 
-## Current product surface — v0.5
+- Router9 inbound pipeline with verification, normalization, idempotency, policy, skill selection, knowledge, response and dispatch.
+- Telegram, Facebook Messenger, Zalo OA, TikTok webhook and Web Chat integration surfaces.
+- AI / Scenario / Hybrid bot modes with product introduction and product advisor scenarios.
+- Safe dynamic instruction skills and per-bot Tool Policy.
+- Durable SQLite Inbox with redacted messages and human-handoff tickets.
+- Encrypted Credential Vault using AES-256-GCM.
+- Embeddable Web Widget with explicit website-origin allowlist, CSP `frame-ancestors` and short-lived signed grants.
+- Windows Electron app with AppData state and packaged executable smoke tests.
+- Docker Desktop named-volume state for SQLite reliability.
+- Docker/VPS stack with Caddy, Redis, PostgreSQL and n8n.
+- Operations Center, backup/repair flows and deployment setup.
+- Vercel hosted console with explicit API routing and truthful preview fallback.
 
-- Create many bots in one workspace.
-- Bot modes: **AI Autopilot**, **Scenario**, and **Hybrid**.
-- Product setup directly in the onboarding wizard.
-- Reusable scenarios: Sales Assistant, Product Introduction, Product Advisor, Customer Support and Order Tracking.
-- Safe dynamic runtime skills: built-ins + custom instruction skills with version/hash, enable/disable, search and per-bot allowlists.
-- BM25-style zero-dependency skill metadata search and skill-routing eval endpoint.
-- Independent skill-content safety scanner. Custom skills cannot execute scripts or install dependencies.
-- Per-bot Tool Policy profiles controlling retrieval, memory, AI, workflow and channel side effects.
-- Bounded conversation memory scoped by bot/channel/conversation/sender.
-- Bounded in-process ConversationScheduler: one active turn per conversation while unrelated customers remain concurrent.
-- Privacy-minimized Router9 trace records.
-- Ordered OpenAI-compatible AI fallback candidates through `AI_FALLBACKS_JSON` with truthful provider/fallback reporting.
-- **Durable Inbox** backed by Node 22 built-in SQLite for Windows and one-node VPS deployments.
-- Durable redacted message history, unread state and human-handoff tickets.
-- Inbox search/filter, message detail, pending/resolve handoff, archive and explicit delete.
-- Configurable conversation retention, defaulting to 30 days; active handoff tickets are retained.
-- Windows desktop app with embedded Bot Hub runtime and AppData state.
-- Windows QR handoff uses a reachable LAN address rather than `127.0.0.1` when possible.
-- Desktop management UI/API remain loopback-only; the LAN listener exposes only `/connect/*`.
-- Public VPS management is protected by a single-operator admin gate; provider webhook/OAuth handoff routes stay public.
-- Settings → Deployment for Desktop/LAN vs Docker/VPS setup draft.
-- VPS bootstrap helper generates deployment secrets without printing them.
-- Docker Compose automatically sets `PUBLIC_BASE_URL=https://${BOT_DOMAIN}`.
-- Telegram webhook receive + send.
-- Facebook Messenger verification, raw-body HMAC receive + send.
-- Zalo OA inbound normalization + configurable approved outbound adapter.
-- TikTok official public webhook signature/timestamp verification and event normalization.
-- Web Chat instant setup.
-- Bot-aware webhook routes: `/webhooks/:botId/:channel`.
-- Local repository knowledge import/search.
-- n8n workflow bridge.
-- Docker Compose: app + PostgreSQL + Redis + n8n + Caddy.
-- Original Claude Code project skills under `.claude/skills/`.
+## Vercel console vs runtime
 
-> Provider capability still depends on the real approved account/app credentials and product permissions. QR connection is an authorization handoff, not personal-account cookie/session automation. TikTok generic customer DM outbound is not assumed.
-
-## Durable Inbox and human handoff
-
-The v0.5 single-node runtime stores accepted live channel turns in:
+Vercel is the hosted management console. The real Bot Hub runtime should run on Windows/Docker/VPS.
 
 ```text
-./data/state/conversations.sqlite
+Browser → Vercel console → BOT_RUNTIME_URL → Bot Hub runtime
 ```
 
-Windows desktop places the same ledger under the app's AppData `state` directory. Docker maps it through the existing persistent `data/state` volume.
-
-The ledger stores only bounded operational content:
-
-- conversation metadata;
-- redacted customer/assistant message text;
-- human-handoff tickets.
-
-It does **not** persist raw provider webhook bodies, signatures, headers, AI system prompts or repository source documents. Simulator calls are not added to the inbox.
-
-Before storage the runtime redacts high-risk secret fields, Bearer credentials, private-key blocks and Luhn-valid payment card numbers while preserving ordinary business references such as order IDs. Default retention is 30 days; unresolved human handoffs are preserved until their tickets are resolved/closed.
-
-Management API:
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/api/conversations` | Search/filter durable conversations |
-| GET/PATCH/DELETE | `/api/conversations/:id` | Read, mark read/update status, or explicitly delete |
-| GET | `/api/tickets` | List human-handoff tickets |
-| PATCH | `/api/tickets/:id` | Set pending/resolved/closed and priority |
-| POST | `/api/maintenance/conversation-retention` | Run retention pruning |
-
-See [`docs/CONVERSATION-PERSISTENCE.md`](docs/CONVERSATION-PERSISTENCE.md).
-
-## Dynamic runtime skills
-
-Built-in skills cover sales, product introduction, product advising/comparison, support triage, order care, human handoff and knowledge retrieval.
-
-Custom skill lifecycle:
+Provider webhooks must point directly to the public runtime, for example:
 
 ```text
-Publish instruction skill
-  ↓
-validate + safety scan
-  ↓
-SHA-256 hash / version
-  ↓
-enable or disable
-  ↓
-optional per-bot allowlist
-  ↓
-intent match / metadata search
-  ↓
-load selected instructions
-  ↓
-ConversationScheduler
-  ↓
-Router9 + Tool Policy
-  ↓
-AI / scenario / workflow / channel
-  ↓
-durable Inbox / handoff ticket
+https://bot.example.com/webhooks/<botId>/<channel>
 ```
 
-Custom runtime skills are instructions-only. They cannot run shell commands, install dependencies or receive generic OS execution access.
+Bot Hub intentionally does not proxy signed provider webhook bodies through Vercel. The Vercel `/webhooks/*` surface returns `503 direct_runtime_webhook_required` so raw signed bytes are verified at the real runtime.
+
+Recommended Vercel variables:
+
+```text
+BOT_RUNTIME_URL=https://bot.example.com
+BOT_RUNTIME_ADMIN_USER=admin
+BOT_RUNTIME_ADMIN_TOKEN=<same admin token as VPS>
+BOT_RUNTIME_STRICT=true
+```
+
+Without `BOT_RUNTIME_URL`, the console runs a clearly labelled preview. Preview QR setup does not claim that provider OAuth or webhook delivery has completed.
+
+## QR connection
+
+Windows QR handoff uses a reachable LAN address when possible; it never generates a phone QR pointing to `127.0.0.1`. For public provider OAuth/webhooks, deploy a public HTTPS runtime.
+
+Zalo production integration uses official Zalo OA/Bot developer capabilities. Bot Hub does not capture personal-account cookies or browser sessions.
+
+## Credential Vault
+
+Production VPS should configure:
+
+```text
+CREDENTIAL_VAULT_MASTER_KEY=<long random secret>
+CREDENTIAL_VAULT_FILE=/app/data/state/credentials.json
+```
+
+Windows desktop generates and reuses a local credential key under AppData. List/status APIs expose only public metadata, never plaintext provider secrets.
+
+## Web Widget
+
+Cross-origin embedding is deny-by-default. Add each approved website origin:
+
+```text
+WEB_WIDGET_ENABLED=true
+WEB_WIDGET_ALLOWED_ORIGINS=https://shop.example.com
+WEB_WIDGET_SIGNING_KEY=<long random secret>
+WEB_WIDGET_TOKEN_TTL_SECONDS=900
+```
+
+Embed the widget from the real runtime:
+
+```html
+<script src="https://bot.example.com/widget.js" data-bot-id="bot_..." data-title="Chat with us"></script>
+```
+
+The widget validates the parent website origin, returns a matching frame CSP and uses a signed grant bound to bot, parent origin and expiration.
 
 ## Windows desktop
+
+Requires Node.js 22 for development/build tooling.
 
 ```bash
 npm install --no-audit --no-fund
 npm run desktop
-```
-
-Build the NSIS x64 installer:
-
-```bash
 npm run desktop:build
 ```
 
-The Electron package embeds the Node Bot Hub runtime. CI executes the packaged Windows executable with `--desktop-smoke-test` before publishing its installer artifact.
+The Windows CI job runs syntax checks, all tests, builds the NSIS x64 installer, then starts the packaged executable with `--desktop-smoke-test` before uploading the artifact.
 
-## Quick start
-
-Requires Node.js 22+.
+## Local development
 
 ```bash
 cp .env.example .env
@@ -136,96 +105,40 @@ npm test
 npm start
 ```
 
-Open `http://localhost:8787`.
+Open `http://127.0.0.1:8787`.
 
 ## Docker / VPS
 
 ```bash
 sh scripts/vps-bootstrap.sh bot.example.com n8n.example.com
-# Fill only approved provider credentials/OAuth templates in .env.
 docker compose up -d --build
-```
-
-Then verify:
-
-```bash
 docker compose ps
-curl -fsS https://bot.example.com/api/health
 ```
 
-The bootstrap script creates PostgreSQL, n8n and Bot Hub admin secrets directly in the local mode-600 `.env` and does not print them. Caddy is the public TLS edge; PostgreSQL and Redis remain on the internal network.
+The bootstrap script generates admin, database, n8n, credential-vault and widget-signing secrets directly into the local mode-600 `.env` without printing them.
 
-See [`docs/VPS-DEPLOY.md`](docs/VPS-DEPLOY.md).
+## Security boundaries
 
-## Provider behavior
-
-- **Telegram:** secret-token verified inbound webhook and Bot API text outbound when configured.
-- **Facebook Messenger:** verification challenge, raw-body HMAC receive and Messenger text outbound with the approved page token.
-- **Zalo OA:** tolerant inbound normalization. Exact outbound endpoint/token behavior remains configuration-driven because current OA product/version approval determines the contract.
-- **TikTok:** public developer webhook HMAC/timestamp verification and event normalization. Outbound messaging is enabled only if an approved messaging capability/endpoint is explicitly configured.
-- **Web Chat:** instant local Bot Hub setup surface.
-
-## Repository knowledge
-
-```bash
-bash scripts/import-repo.sh https://github.com/owner/repository.git
-```
-
-The importer shallow-clones into `data/repos/<name>`, removes `.git`, common build directories and key/certificate files, then the local index searches supported source/document files.
-
-## Security posture
-
-- Raw-byte webhook verification where required.
-- Constant-time signature/secret comparison.
-- TikTok timestamp tolerance and idempotency protection.
-- Request body limits and explicit JSON parsing.
-- Skill publishing bounds + high-risk instruction scanner.
-- Built-in skill overwrite protection and per-bot grants.
-- Tool-policy deny precedence.
-- Bounded per-conversation queue with retryable overload response.
-- Conversation persistence excludes raw webhook bodies.
-- Stored customer text receives targeted secret/payment redaction.
-- Configurable retention and explicit delete.
-- QR sessions expire and contain only a temporary Bot Hub URL, never provider access tokens.
-- Desktop management remains localhost-only; LAN handoff exposes only `/connect/*`.
-- Public VPS management uses the Bot Hub admin gate.
-- Product/order/policy answers must be grounded in business systems or verified knowledge.
-
-## Scale boundary
-
-v0.5 SQLite persistence is intentionally a **single-node** store. Do not run multiple Bot Hub replicas against the same SQLite file.
-
-The next production-scale phase is:
-
-1. PostgreSQL repository for conversations/messages/tickets and later bot/skill state.
-2. Redis distributed idempotency, conversation locks and queue state.
-3. Multi-user authentication/RBAC and audit ownership.
-4. Provider health/cooldown/usage accounting.
-5. Document ingestion workers for PDF/DOCX/XLSX/PPTX.
-
-## GoClaw architecture study
-
-The project studied `nextlevelbuilder/goclaw` as an architecture reference for skill lifecycle, tool policy, memory, tracing, provider fallback, store abstraction and runtime safety. The reviewed GoClaw repository license is CC BY-NC 4.0, so this project uses it as a conceptual reference only. No GoClaw source, prompts, regex sets, bundled skill prose, UI code or executable assets are copied.
-
-See [`docs/GOCLAW-ADAPTATION.md`](docs/GOCLAW-ADAPTATION.md) and [`docs/SOURCES-LICENSES.md`](docs/SOURCES-LICENSES.md).
-
-## Claude Code workflow
-
-Start with [`CLAUDE.md`](CLAUDE.md). Project skills cover Bot Hub product, scenarios, deployment/VPS, connectors, webhook security, n8n, repository knowledge, quality gates, dynamic skills, skill evals, runtime security, tool policy, memory/session, provider resilience, document ingestion, workspace discipline, cross-surface parity, runtime pipeline and operations diagnostics.
+- Management APIs are protected on public VPS.
+- Web Widget public routes are separated from management-console CORS/auth rules.
+- Provider webhook verification uses the original runtime request body where required.
+- Credential Vault uses authenticated encryption.
+- QR sessions expire and do not contain provider access tokens.
+- Product, price, promotion, order and policy responses must be grounded in verified business data.
+- SQLite remains a single-node persistence backend; migrate to PostgreSQL/Redis before multi-replica scale.
 
 ## Documentation
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/CHANNELS.md`](docs/CHANNELS.md)
-- [`docs/CONVERSATION-PERSISTENCE.md`](docs/CONVERSATION-PERSISTENCE.md)
-- [`docs/PRODUCT-SCENARIOS.md`](docs/PRODUCT-SCENARIOS.md)
-- [`docs/GOCLAW-ADAPTATION.md`](docs/GOCLAW-ADAPTATION.md)
-- [`docs/N8N.md`](docs/N8N.md)
-- [`docs/VPS-DEPLOY.md`](docs/VPS-DEPLOY.md)
-- [`docs/SECURITY.md`](docs/SECURITY.md)
-- [`docs/ROADMAP.md`](docs/ROADMAP.md)
-- [`docs/SOURCES-LICENSES.md`](docs/SOURCES-LICENSES.md)
+- `docs/ARCHITECTURE.md`
+- `docs/CHANNELS.md`
+- `docs/CONVERSATION-PERSISTENCE.md`
+- `docs/PRODUCT-SCENARIOS.md`
+- `docs/VPS-DEPLOY.md`
+- `docs/SECURITY.md`
+- `docs/ROADMAP.md`
+- `docs/GOCLAW-ADAPTATION.md`
+- `docs/SOURCES-LICENSES.md`
 
 ## License
 
-MIT for this repository's original code. Third-party services, images and dependencies retain their upstream licenses and terms.
+MIT for this repository's original code. Third-party services and dependencies retain their upstream licenses and terms.

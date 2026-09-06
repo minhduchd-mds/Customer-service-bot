@@ -30,8 +30,10 @@ jobs:
         run: |
           sh -n scripts/vps-bootstrap.sh
           node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); JSON.parse(require('fs').readFileSync('vercel.json','utf8'));"
+          cp .env.example .env
           docker compose config >/dev/null
           docker compose -f docker-compose.desktop.yml config >/dev/null
+          rm -f .env
 
   docker:
     runs-on: ubuntu-latest
