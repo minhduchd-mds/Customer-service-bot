@@ -14,6 +14,11 @@ services:
       CREDENTIAL_VAULT_FILE: /app/data/state/credentials.json
       CREDENTIAL_VAULT_LOCAL_KEY_FILE: /app/data/state/credentials.key
       CREDENTIAL_VAULT_ALLOW_LOCAL_KEY: "false"
+      AI_CONNECTION_STORE_FILE: /app/data/state/ai-connections.json
+      GEMINI_OAUTH_CLIENT_ID: ${GEMINI_OAUTH_CLIENT_ID:-}
+      GEMINI_OAUTH_CLIENT_SECRET: ${GEMINI_OAUTH_CLIENT_SECRET:-}
+      GEMINI_OAUTH_REDIRECT_URI: ${GEMINI_OAUTH_REDIRECT_URI:-}
+      GEMINI_OAUTH_SCOPES: ${GEMINI_OAUTH_SCOPES:-openid,email,https://www.googleapis.com/auth/cloud-platform}
       KNOWLEDGE_ROOT: /app/data/repos
       WEB_WIDGET_ENABLED: ${WEB_WIDGET_ENABLED:-true}
       WEB_WIDGET_ALLOWED_ORIGINS: ${WEB_WIDGET_ALLOWED_ORIGINS:-}
