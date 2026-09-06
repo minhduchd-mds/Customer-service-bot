@@ -2,10 +2,16 @@ import http from 'node:http';
 import { createApp } from './app.js';
 import { AdminAuth, protectAdminSurface } from './core/admin-auth.js';
 import { attachConversationPersistence } from './core/conversation-runtime.js';
+import { applyWebConsoleCors } from './core/web-console-cors.js';
 
 const app = attachConversationPersistence(createApp());
 const adminAuth = new AdminAuth(app.config.admin);
-const server = http.createServer(protectAdminSurface(app.handler, adminAuth));
+const protectedHandler = protectAdminSurface(app.handler, adminAuth);
+const server = http.createServer((request, response) => {
+  const cors = applyWebConsoleCors(request, response, app.config.webConsole);
+  if (cors.handled) return;
+  return protectedHandler(request, response);
+});
 server.keepAliveTimeout = 65_000;
 server.headersTimeout = 70_000;
 
@@ -17,6 +23,7 @@ server.listen(app.config.port, app.config.host, () => {
     host: app.config.host,
     port: app.config.port,
     adminAuth: adminAuth.mode(),
+    webConsoleOrigins: app.config.webConsole?.origins?.length || 0,
     conversationStore: app.conversations?.snapshot?.().backend || 'disabled'
   })}\n`);
 });
