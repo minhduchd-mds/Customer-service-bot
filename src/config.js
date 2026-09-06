@@ -3,6 +3,12 @@ const int = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const csv = (value) => String(value || '')
+  .split(',')
+  .map((item) => item.trim())
+  .filter(Boolean)
+  .slice(0, 20);
+
 const jsonArray = (value) => {
   if (!value) return [];
   try {
@@ -31,6 +37,9 @@ export function loadConfig(env = process.env) {
     skillStoreFile: env.SKILL_STORE_FILE || './data/state/skills.json',
     traceLimit: int(env.TRACE_LIMIT, 250),
     conversationMemoryTurns: int(env.CONVERSATION_MEMORY_TURNS, 12),
+    webConsole: {
+      origins: csv(env.WEB_CONSOLE_ORIGINS)
+    },
     conversations: {
       file: env.CONVERSATION_DB_FILE || './data/state/conversations.sqlite',
       retentionDays: int(env.CONVERSATION_RETENTION_DAYS, 30),
