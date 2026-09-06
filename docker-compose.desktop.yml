@@ -10,10 +10,13 @@ services:
       PLATFORM_SETTINGS_FILE: /app/data/state/platform-settings.json
       SKILL_STORE_FILE: /app/data/state/skills.json
       CONVERSATION_DB_FILE: /app/data/state/conversations.sqlite
+      CONVERSATION_RETENTION_DAYS: ${CONVERSATION_RETENTION_DAYS:-30}
       KNOWLEDGE_ROOT: /app/data/repos
-      WEB_CONSOLE_ORIGINS: ${WEB_CONSOLE_ORIGINS:-https://customer-service-bot-duc-s-projects.vercel.app}
+      BOT_HUB_ADMIN_USER: ${BOT_HUB_ADMIN_USER:-admin}
+      BOT_HUB_ADMIN_TOKEN: ${BOT_HUB_ADMIN_TOKEN:-}
+      WEB_CONSOLE_ORIGINS: ${WEB_CONSOLE_ORIGINS:-https://customer-service-bot-zeta.vercel.app,https://customer-service-bot-duc-s-projects.vercel.app}
     ports:
-      - "127.0.0.1:8787:8787"
+      - "8787:8787"
     volumes:
       - bot_state:/app/data/state
       - ./data/repos:/app/data/repos:ro
