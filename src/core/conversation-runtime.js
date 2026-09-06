@@ -6,6 +6,7 @@ import { HttpError, json, parseJson, readRawBody } from '../lib/http.js';
 
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../public');
 const inboxAssets = new Map([
+  ['/runtime.js', ['runtime.js', 'text/javascript; charset=utf-8']],
   ['/inbox.js', ['inbox.js', 'text/javascript; charset=utf-8']],
   ['/inbox.css', ['inbox.css', 'text/css; charset=utf-8']]
 ]);
