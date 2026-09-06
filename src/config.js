@@ -3,6 +3,11 @@ const int = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const bool = (value, fallback = false) => {
+  if (value == null || value === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+};
+
 const csv = (value) => String(value || '')
   .split(',')
   .map((item) => item.trim())
@@ -39,6 +44,17 @@ export function loadConfig(env = process.env) {
     conversationMemoryTurns: int(env.CONVERSATION_MEMORY_TURNS, 12),
     webConsole: {
       origins: csv(env.WEB_CONSOLE_ORIGINS)
+    },
+    webWidget: {
+      enabled: bool(env.WEB_WIDGET_ENABLED, true),
+      allowedOrigins: csv(env.WEB_WIDGET_ALLOWED_ORIGINS),
+      maxMessageChars: int(env.WEB_WIDGET_MAX_MESSAGE_CHARS, 2000)
+    },
+    credentials: {
+      file: env.CREDENTIAL_VAULT_FILE || './data/state/credentials.json',
+      masterKey: env.CREDENTIAL_VAULT_MASTER_KEY || env.BOT_HUB_MASTER_KEY || '',
+      localKeyFile: env.CREDENTIAL_VAULT_LOCAL_KEY_FILE || './data/state/credentials.key',
+      allowLocalKey: bool(env.CREDENTIAL_VAULT_ALLOW_LOCAL_KEY, false)
     },
     conversations: {
       file: env.CONVERSATION_DB_FILE || './data/state/conversations.sqlite',
