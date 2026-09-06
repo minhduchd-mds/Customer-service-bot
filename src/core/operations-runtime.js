@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { HttpError, json, parseJson, readRawBody } from '../lib/http.js';
+import { attachChannelAccounts } from './channel-accounts-runtime.js';
 import { OperationsCenter } from './operations-center.js';
 
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../public');
@@ -11,6 +12,7 @@ const assets = new Map([
 ]);
 
 export function attachOperationsCenter(runtime) {
+  runtime = attachChannelAccounts(runtime);
   if (!runtime?.conversations || !runtime?.config || typeof runtime.handler !== 'function') throw new Error('operations_requires_conversation_runtime');
   if (runtime.operations) return runtime;
 
