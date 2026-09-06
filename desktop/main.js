@@ -3,6 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createApp } from '../src/app.js';
+import { attachAiConnections } from '../src/core/ai-connections-runtime.js';
 import { attachConnectionActions } from '../src/core/connect-actions-runtime.js';
 import { attachConversationPersistence } from '../src/core/conversation-runtime.js';
 import { attachCredentialVault } from '../src/core/credential-runtime.js';
@@ -87,11 +88,13 @@ async function startEmbeddedRuntime() {
   process.env.CREDENTIAL_VAULT_FILE = path.join(stateDir, 'credentials.json');
   process.env.CREDENTIAL_VAULT_LOCAL_KEY_FILE = path.join(stateDir, 'credentials.key');
   process.env.CREDENTIAL_VAULT_ALLOW_LOCAL_KEY = 'true';
+  process.env.AI_CONNECTION_STORE_FILE = path.join(stateDir, 'ai-connections.json');
   process.env.WEB_WIDGET_ENABLED = 'true';
   process.env.KNOWLEDGE_ROOT = knowledgeDir;
 
   let runtime = createApp();
   await attachCredentialVault(runtime);
+  await attachAiConnections(runtime);
   runtime = attachWebWidget(attachOperationsCenter(attachConversationPersistence(attachConnectionActions(runtime))));
   const server = http.createServer(runtime.handler);
   tuneServer(server);
@@ -146,6 +149,12 @@ async function runDesktopSmokeTest(origin, qrOrigin, qrSource) {
 
   const credentials = await getJson(`${origin}/api/credentials/status`, 'credential vault');
   if (!credentials?.vault?.enabled || credentials.vault.mode !== 'local-key') throw new Error('Desktop credential vault is not enabled with a local key');
+
+  const providers = await getJson(`${origin}/api/ai/providers`, 'AI providers');
+  if (!Array.isArray(providers?.providers) || !providers.providers.some((item) => item.id === 'openai') || !providers.providers.some((item) => item.id === 'gemini')) throw new Error('Desktop AI provider catalog is unavailable');
+
+  const aiConnections = await getJson(`${origin}/api/ai/connections`, 'AI connections');
+  if (!Array.isArray(aiConnections?.connections)) throw new Error('Desktop AI connection store is unavailable');
 
   const widgetScript = await fetch(`${origin}/widget.js`, { signal: AbortSignal.timeout(10_000) });
   if (!widgetScript.ok || !String(widgetScript.headers.get('content-type') || '').includes('javascript')) throw new Error('Desktop web widget asset is unavailable');
