@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createApp } from './app.js';
 import { AdminAuth, protectAdminSurface } from './core/admin-auth.js';
+import { attachAiConnections } from './core/ai-connections-runtime.js';
 import { attachConnectionActions } from './core/connect-actions-runtime.js';
 import { attachConversationPersistence } from './core/conversation-runtime.js';
 import { attachCredentialVault } from './core/credential-runtime.js';
@@ -10,6 +11,7 @@ import { applyWebConsoleCors } from './core/web-console-cors.js';
 
 let app = createApp();
 await attachCredentialVault(app);
+await attachAiConnections(app);
 app = attachWebWidget(attachOperationsCenter(attachConversationPersistence(attachConnectionActions(app))));
 const adminAuth = new AdminAuth(app.config.admin);
 const protectedHandler = protectAdminSurface(app.handler, adminAuth);
@@ -33,6 +35,7 @@ server.listen(app.config.port, app.config.host, () => {
     connectionActions: Boolean(app.connectionActions),
     conversationStore: app.conversations?.snapshot?.().backend || 'disabled',
     credentialVault: app.credentialVault?.status?.().mode || 'disabled',
+    aiConnections: Boolean(app.aiConnections),
     webWidget: Boolean(app.webWidget?.enabled),
     operations: Boolean(app.operations)
   })}\n`);
