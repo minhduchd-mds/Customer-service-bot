@@ -4,7 +4,8 @@ import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createApp } from '../src/app.js';
 import { attachConversationPersistence } from '../src/core/conversation-runtime.js';
-import { selectLanAddress } from './network.js';
+import { attachOperationsCenter } from '../src/core/operations-runtime.js';
+import { isLoopbackUrl, selectLanAddress } from './network.js';
 
 const APP_NAME = 'Customer Service Bot';
 const SMOKE_TEST = process.argv.includes('--desktop-smoke-test');
@@ -45,35 +46,22 @@ app.whenReady().then(async () => {
       localServer = null;
       try { embeddedRuntime?.conversations?.close?.(); } catch {}
       embeddedRuntime = null;
-      console.log(JSON.stringify({
-        ok: true,
-        event: 'desktop_smoke_test_passed',
-        origin: localOrigin,
-        qrOrigin: runtime.qrOrigin,
-        qrSource: runtime.qrSource
-      }));
+      console.log(JSON.stringify({ ok: true, event: 'desktop_smoke_test_passed', origin: localOrigin, qrOrigin: runtime.qrOrigin, qrSource: runtime.qrSource }));
       app.exit(0);
       return;
     }
 
     mainWindow = createWindow(localOrigin);
   } catch (error) {
-    const detail = error?.stack || error?.message || String(error);
-    console.error('Desktop startup failed:', detail);
+    console.error('Desktop startup failed:', error?.stack || error?.message || String(error));
     app.exit(1);
   }
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0 && localOrigin && !SMOKE_TEST) {
-    mainWindow = createWindow(localOrigin);
-  }
+  if (BrowserWindow.getAllWindows().length === 0 && localOrigin && !SMOKE_TEST) mainWindow = createWindow(localOrigin);
 });
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => {
   if (handoffServer) handoffServer.close();
   if (localServer) localServer.close();
@@ -95,18 +83,18 @@ async function startEmbeddedRuntime() {
   process.env.CONVERSATION_DB_FILE = path.join(stateDir, 'conversations.sqlite');
   process.env.KNOWLEDGE_ROOT = knowledgeDir;
 
-  const runtime = attachConversationPersistence(createApp());
+  const runtime = attachOperationsCenter(attachConversationPersistence(createApp()));
   const server = http.createServer(runtime.handler);
   tuneServer(server);
   await listen(server, '127.0.0.1');
-
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Unable to resolve local desktop server port');
   const origin = `http://127.0.0.1:${address.port}`;
 
-  const configuredPublicBase = String(process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
-  let qrOrigin = configuredPublicBase || origin;
-  let qrSource = configuredPublicBase ? 'public' : 'loopback';
+  const configured = String(process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
+  const configuredPublicBase = configured && !isLoopbackUrl(configured) ? configured : '';
+  let qrOrigin = configuredPublicBase || null;
+  let qrSource = configuredPublicBase ? 'public' : 'unavailable';
   let qrHandoffServer = null;
 
   if (!configuredPublicBase) {
@@ -120,44 +108,43 @@ async function startEmbeddedRuntime() {
       qrOrigin = `http://${lanAddress}:${handoffAddress.port}`;
       qrSource = 'lan';
     } else {
-      console.warn('No reachable LAN IPv4 address found. QR handoff will remain localhost-only until PUBLIC_BASE_URL is configured.');
+      console.warn('No phone-reachable LAN IPv4 address found. QR creation is disabled until Wi-Fi/Ethernet or a public HTTPS URL is available.');
     }
   }
 
-  runtime.connectSessions.publicBaseUrl = qrOrigin;
+  runtime.connectSessions.setPublicBaseUrl(qrOrigin || '');
   return { server, handoffServer: qrHandoffServer, runtime, origin, qrOrigin, qrSource };
 }
 
 async function runDesktopSmokeTest(origin, qrOrigin, qrSource) {
-  const healthResponse = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(10_000) });
-  if (!healthResponse.ok) throw new Error(`Desktop health endpoint returned ${healthResponse.status}`);
-  const health = await healthResponse.json();
+  const health = await getJson(`${origin}/api/health`, 'health');
   if (health?.ok !== true || health?.product !== 'Bot Hub') throw new Error('Desktop health payload is invalid');
 
-  const botsResponse = await fetch(`${origin}/api/bots`, { signal: AbortSignal.timeout(10_000) });
-  if (!botsResponse.ok) throw new Error(`Desktop bots endpoint returned ${botsResponse.status}`);
-  const bots = await botsResponse.json();
+  const bots = await getJson(`${origin}/api/bots`, 'bots');
   if (!Array.isArray(bots?.bots)) throw new Error('Desktop bots endpoint payload is invalid');
 
-  const skillsResponse = await fetch(`${origin}/api/skills`, { signal: AbortSignal.timeout(10_000) });
-  if (!skillsResponse.ok) throw new Error(`Desktop skills endpoint returned ${skillsResponse.status}`);
-  const skills = await skillsResponse.json();
+  const skills = await getJson(`${origin}/api/skills`, 'skills');
   if (!Array.isArray(skills?.skills) || !skills.skills.length) throw new Error('Desktop skills endpoint payload is invalid');
 
-  const deploymentResponse = await fetch(`${origin}/api/deployment`, { signal: AbortSignal.timeout(10_000) });
-  if (!deploymentResponse.ok) throw new Error(`Desktop deployment endpoint returned ${deploymentResponse.status}`);
-  const deployment = await deploymentResponse.json();
+  const deployment = await getJson(`${origin}/api/deployment`, 'deployment');
   if (!deployment?.deployment || typeof deployment?.dockerEnv !== 'string') throw new Error('Desktop deployment payload is invalid');
 
-  const conversationsResponse = await fetch(`${origin}/api/conversations`, { signal: AbortSignal.timeout(10_000) });
-  if (!conversationsResponse.ok) throw new Error(`Desktop conversations endpoint returned ${conversationsResponse.status}`);
-  const conversations = await conversationsResponse.json();
+  const conversations = await getJson(`${origin}/api/conversations`, 'conversations');
   if (!Array.isArray(conversations?.conversations)) throw new Error('Desktop conversations payload is invalid');
 
-  if (qrSource === 'lan') {
+  const operations = await getJson(`${origin}/api/operations/doctor`, 'operations doctor');
+  if (!operations?.doctor || operations.doctor.state?.backend !== 'sqlite') throw new Error('Desktop operations payload is invalid');
+
+  if (qrSource === 'lan' && qrOrigin) {
     const handoffResponse = await fetch(`${qrOrigin}/connect/desktop-smoke-invalid`, { signal: AbortSignal.timeout(10_000) });
     if (handoffResponse.status !== 404) throw new Error(`Desktop LAN handoff returned unexpected status ${handoffResponse.status}`);
   }
+}
+
+async function getJson(url, label) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`Desktop ${label} endpoint returned ${response.status}`);
+  return response.json();
 }
 
 function createWindow(origin) {
@@ -170,13 +157,7 @@ function createWindow(origin) {
     backgroundColor: '#F5F5F7',
     title: APP_NAME,
     autoHideMenuBar: true,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-      devTools: !app.isPackaged
-    }
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, devTools: !app.isPackaged }
   });
 
   window.once('ready-to-show', () => window.show());
@@ -197,9 +178,8 @@ function createWindow(origin) {
 function connectOnlyHandler(appHandler) {
   return (request, response) => {
     let pathname = '';
-    try {
-      pathname = new URL(request.url || '/', 'http://handoff.local').pathname;
-    } catch {
+    try { pathname = new URL(request.url || '/', 'http://handoff.local').pathname; }
+    catch {
       response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
       response.end('Bad request');
       return;
@@ -210,29 +190,13 @@ function connectOnlyHandler(appHandler) {
   };
 }
 
-function tuneServer(server) {
-  server.keepAliveTimeout = 65_000;
-  server.headersTimeout = 70_000;
-}
-
+function tuneServer(server) { server.keepAliveTimeout = 65_000; server.headersTimeout = 70_000; }
 function listen(server, host) {
   return new Promise((resolve, reject) => {
     const onError = (error) => reject(error);
     server.once('error', onError);
-    server.listen(0, host, () => {
-      server.off('error', onError);
-      resolve();
-    });
+    server.listen(0, host, () => { server.off('error', onError); resolve(); });
   });
 }
-
-function isLocalUrl(url, origin) {
-  try { return new URL(url).origin === origin; } catch { return false; }
-}
-
-function closeServer(server) {
-  return new Promise((resolve) => {
-    if (!server?.listening) return resolve();
-    server.close(() => resolve());
-  });
-}
+function isLocalUrl(url, origin) { try { return new URL(url).origin === origin; } catch { return false; } }
+function closeServer(server) { return new Promise((resolve) => { if (!server?.listening) return resolve(); server.close(() => resolve()); }); }
